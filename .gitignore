@@ -9,3 +9,4 @@ out/
 coverage/
 *.tsbuildinfo
 work/
+supabase/.temp/
