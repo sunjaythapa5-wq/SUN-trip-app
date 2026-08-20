@@ -216,17 +216,17 @@ set search_path = ''
 as $$
 declare
   current_user_id uuid := auth.uid();
-  current_role public.trip_role;
+  membership_role public.trip_role;
 begin
   if current_user_id is null then raise exception 'Authentication required'; end if;
 
-  select role into current_role
+  select role into membership_role
   from public.trip_members
   where trip_id = target_trip_id and user_id = current_user_id and status = 'active'
   for update;
 
   if not found then raise exception 'Active membership required'; end if;
-  if current_role = 'owner' then raise exception 'The owner must delete the trip instead'; end if;
+  if membership_role = 'owner' then raise exception 'The owner must delete the trip instead'; end if;
 
   update public.trip_members
   set status = 'removed', removed_at = now()
