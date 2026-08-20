@@ -27,9 +27,10 @@ select throws_ok(
   $$insert into public.trip_members (trip_id, user_id, role) values ('10000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'owner')$$,
   '42501', null, 'outsider cannot self-assign owner'
 );
-select throws_ok(
-  $$delete from public.trips where id = '10000000-0000-0000-0000-000000000001'$$,
-  '42501', null, 'outsider cannot delete trip'
+select results_eq(
+  $$delete from public.trips where id = '10000000-0000-0000-0000-000000000001' returning id$$,
+  $$select null::uuid where false$$,
+  'outsider cannot delete trip'
 );
 
 select * from finish();
