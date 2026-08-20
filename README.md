@@ -15,8 +15,9 @@ This repository currently contains foundation work only:
 - database security tests
 - Vercel-ready application and CI checks
 
-Authentication screens, planning features, Thailand data, Trip Check and scenario UI are
-intentionally not implemented yet.
+Gate 2 adds email/password sign-up, sign-in, sign-out, persisted SSR sessions, safe auth
+callbacks, protected `/app` routes and tested redirect rules. Planning features, Thailand
+data, Trip Check and scenario UI are intentionally not implemented yet.
 
 ## Local setup
 
@@ -45,3 +46,7 @@ Never expose a Supabase service-role key to the browser or commit environment fi
 Connect this repository to Vercel. Add `NEXT_PUBLIC_SUPABASE_URL` and
 `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` separately for Preview and Production. Configure
 the matching callback URLs in Supabase Auth before authentication is enabled.
+
+For local development, allow `http://localhost:3000/auth/callback`. For Vercel, add the
+Preview and Production `/auth/callback` URLs. Email/password authentication must be enabled
+in Supabase; choose whether email confirmation is required before private-alpha testing.
