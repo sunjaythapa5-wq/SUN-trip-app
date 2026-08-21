@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "verify:hosted-schema": "node scripts/verify-hosted-schema.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.4",
