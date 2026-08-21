@@ -33,10 +33,10 @@ export function InviteForm({ tripId }: { tripId: string }) {
         <label htmlFor="invite-role">Role</label>
         <select id="invite-role" name="role" defaultValue="traveller">
           <option value="planner">Planner — can edit and invite</option>
-          <option value="traveller">Traveller — read only for now</option>
+          <option value="traveller">Traveller — can contribute to planning</option>
           <option value="viewer">Viewer — read only</option>
         </select>
-        <button className="primary" type="submit" disabled={pending}>{pending ? "Creating…" : "Create invitation"}</button>
+        <button className="primary" type="submit" disabled={pending}>{pending ? "Sending…" : "Send invite"}</button>
       </form>
       {state.error ? <p className="auth-message error" role="alert">{state.error}</p> : null}
       {inviteUrl ? (
