@@ -45,7 +45,10 @@ select throws_ok($$select public.schedule_trip_idea('43000000-0000-0000-0000-000
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000044","email":"viewer@gate4.test","role":"authenticated"}';
 select results_eq($$select name from public.destinations order by sort_order$$, $$values ('Tokyo city'::text), ('Kyoto'::text)$$, 'viewer sees the shared journey');
-select is_empty($$insert into public.ideas (trip_id, title, category) values ('40000000-0000-0000-0000-000000000041', 'Forbidden idea', 'other') returning id$$, 'viewer cannot create planning data');
+select throws_ok(
+  $$insert into public.ideas (trip_id, title, category) values ('40000000-0000-0000-0000-000000000041', 'Forbidden idea', 'other') returning id$$,
+  '42501', 'new row violates row-level security policy for table "ideas"', 'viewer cannot create planning data'
+);
 select is_empty($$update public.destinations set name = 'Forbidden' where id = '41000000-0000-0000-0000-000000000041' returning id$$, 'viewer cannot edit planning data');
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000045","email":"outsider@gate4.test","role":"authenticated"}';
