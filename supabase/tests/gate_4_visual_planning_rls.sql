@@ -1,5 +1,5 @@
 begin;
-select plan(24);
+select plan(25);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at) values
   ('00000000-0000-0000-0000-000000000041', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'owner@gate4.test', '', now(), now(), now()),
@@ -32,7 +32,8 @@ select lives_ok($$insert into public.destinations (id, trip_id, name, start_date
 select lives_ok($$insert into public.plan_items (id, trip_id, item_type, title, destination_id, item_date, end_date, status) values ('42000000-0000-0000-0000-000000000041', '40000000-0000-0000-0000-000000000041', 'stay', 'Tokyo stay', '41000000-0000-0000-0000-000000000041', '2027-04-02', '2027-04-05', 'booked')$$, 'owner adds a stay spanning nights');
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000042","email":"planner@gate4.test","role":"authenticated"}';
-select lives_ok($$insert into public.plan_items (id, trip_id, item_type, title, destination_id, end_destination_id, item_date, status) values ('42000000-0000-0000-0000-000000000042', '40000000-0000-0000-0000-000000000041', 'transport', 'Train to Kyoto', '41000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', '2027-04-05', 'needs_checking')$$, 'planner adds connecting transport');
+select lives_ok($$insert into public.plan_items (id, trip_id, item_type, title, destination_id, end_destination_id, item_date, status, confidence) values ('42000000-0000-0000-0000-000000000042', '40000000-0000-0000-0000-000000000041', 'transport', 'Train to Kyoto', '41000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', '2027-04-05', 'planned', 'needs_checking')$$, 'planner adds planned transport with operational facts needing checking');
+select results_eq($$select status::text || ':' || confidence::text from public.plan_items where id = '42000000-0000-0000-0000-000000000042'$$, $$values ('planned:needs_checking'::text)$$, 'planning status is independent from information confidence');
 select results_eq($$update public.destinations set name = 'Tokyo city' where id = '41000000-0000-0000-0000-000000000041' returning name$$, $$values ('Tokyo city'::text)$$, 'planner updates canonical destination data');
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000043","email":"traveller@gate4.test","role":"authenticated"}';
