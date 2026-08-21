@@ -3,85 +3,68 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { InviteForm } from "@/features/trips/invite-form";
+import { dateRange, formatDay, formatShortRange, itemLabel, nightsBetween, planItemStatuses, planItemTypes, statusLabel, type Destination, type Idea, type PlanItem } from "@/features/trips/planning";
 import { formatTripDates, initials, tripRoles, type TripInvite, type TripMember, type TripSummary } from "@/features/trips/types";
-import { changeMemberRole, deleteTrip, leaveTrip, removeMember, revokeInvite, updateTrip } from "../actions";
+import { changeMemberRole, createDestination, createIdea, createPlanItem, deleteDestination, deletePlanItem, deleteTrip, leaveTrip, moveDestination, movePlanItem, removeMember, revokeInvite, scheduleIdea, updateDestination, updatePlanItem, updateTrip } from "../actions";
+
+function PlanningForm({ tripId, destinations }: { tripId: string; destinations: Destination[] }) {
+  return <form action={createPlanItem.bind(null, tripId)} className="sheet-form">
+    <label>What are you adding?<select name="type" defaultValue="activity">{planItemTypes.map((type) => <option key={type} value={type}>{itemLabel(type)}</option>)}</select></label>
+    <label>Title<input name="title" required maxLength={160} placeholder="What do you know?" /></label>
+    <label>At destination<select name="destinationId" defaultValue=""><option value="">Not chosen</option>{destinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.name}</option>)}</select></label>
+    <label>Connects to<select name="endDestinationId" defaultValue=""><option value="">Not applicable</option>{destinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.name}</option>)}</select></label>
+    <div className="field-row"><label>Date / check-in<input type="date" name="itemDate" /></label><label>End / check-out<input type="date" name="endDate" /></label></div>
+    <div className="field-row"><label>Start time<input type="time" name="startTime" /></label><label>End time<input type="time" name="endTime" /></label></div>
+    <label>Place or address<input name="location" maxLength={240} /></label><label>Provider<input name="provider" maxLength={160} /></label>
+    <label>Status<select name="status" defaultValue="planned">{planItemStatuses.map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label>
+    <label>Notes<textarea name="notes" rows={3} maxLength={4000} /></label><button className="primary" type="submit">Add to trip</button>
+  </form>;
+}
+
+function DestinationEditor({ tripId, destination, index, total, linkedCount }: { tripId: string; destination: Destination; index: number; total: number; linkedCount: number }) {
+  return <details className="context-menu destination-editor"><summary aria-label={`Edit ${destination.name}`}>Edit</summary><div className="sheet-card"><h3>Edit destination</h3>
+    <form action={updateDestination.bind(null, tripId, destination.id)} className="sheet-form"><label>Name<input name="name" defaultValue={destination.name} required maxLength={120} /></label><div className="field-row"><label>Arrive<input type="date" name="startDate" defaultValue={destination.start_date} required /></label><label>Leave<input type="date" name="endDate" defaultValue={destination.end_date} required /></label></div><label>Notes<textarea name="notes" defaultValue={destination.notes ?? ""} rows={3} maxLength={4000} /></label><button className="primary" type="submit">Save destination</button></form>
+    <div className="move-controls" aria-label={`Move ${destination.name}`}><form action={moveDestination.bind(null, tripId, destination.id, "earlier")}><button className="secondary" disabled={index === 0}>Move earlier</button></form><form action={moveDestination.bind(null, tripId, destination.id, "later")}><button className="secondary" disabled={index === total - 1}>Move later</button></form></div>
+    <form action={deleteDestination.bind(null, tripId, destination.id)} className="remove-form"><p><strong>Remove {destination.name}?</strong><br />This will also remove {linkedCount} linked planning {linkedCount === 1 ? "item" : "items"}. This cannot be undone.</p><button className="danger-button" type="submit">Remove destination</button></form>
+  </div></details>;
+}
+
+function ItemCard({ tripId, item, destinationNames, canPlan }: { tripId: string; item: PlanItem; destinationNames: Map<string, string>; canPlan: boolean }) {
+  return <article className={`plan-item ${item.item_type}`}><div className="item-topline"><span>{itemLabel(item.item_type)}</span><span className={`truth-status ${item.status}`}>{statusLabel(item.status)}</span></div><h4>{item.title}</h4>
+    {item.item_type === "transport" ? <p>{destinationNames.get(item.destination_id ?? "") ?? "Origin missing"} → {destinationNames.get(item.end_destination_id ?? "") ?? "Destination missing"}</p> : null}
+    {item.item_type === "stay" && item.item_date && item.end_date ? <p>{formatShortRange(item.item_date, item.end_date)} · {nightsBetween(item.item_date, item.end_date)} nights</p> : item.item_type !== "transport" ? <p>{item.start_time ? item.start_time.slice(0, 5) : "Time not added"}{item.location ? ` · ${item.location}` : ""}</p> : null}
+    {item.provider ? <p>{item.provider}</p> : null}{canPlan ? <details className="item-editor"><summary className="text-button">View / edit</summary><div className="sheet-card"><h3>Edit {itemLabel(item.item_type).toLowerCase()}</h3><form action={updatePlanItem.bind(null, tripId, item.id)} className="sheet-form"><input type="hidden" name="type" value={item.item_type} /><label>Title<input name="title" defaultValue={item.title} required /></label><label>At destination<select name="destinationId" defaultValue={item.destination_id ?? ""}><option value="">Not chosen</option>{Array.from(destinationNames).map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label><label>Connects to<select name="endDestinationId" defaultValue={item.end_destination_id ?? ""}><option value="">Not applicable</option>{Array.from(destinationNames).map(([id, name]) => <option value={id} key={id}>{name}</option>)}</select></label><div className="field-row"><label>Date / check-in<input type="date" name="itemDate" defaultValue={item.item_date ?? ""} /></label><label>End / check-out<input type="date" name="endDate" defaultValue={item.end_date ?? ""} /></label></div><div className="field-row"><label>Start time<input type="time" name="startTime" defaultValue={item.start_time?.slice(0, 5) ?? ""} /></label><label>End time<input type="time" name="endTime" defaultValue={item.end_time?.slice(0, 5) ?? ""} /></label></div><label>Place<input name="location" defaultValue={item.location ?? ""} /></label><label>Provider<input name="provider" defaultValue={item.provider ?? ""} /></label><label>Status<select name="status" defaultValue={item.status}>{planItemStatuses.map((status) => <option value={status} key={status}>{statusLabel(status)}</option>)}</select></label><label>Notes<textarea name="notes" defaultValue={item.notes ?? ""} rows={3} /></label><button className="primary">Save changes</button></form><div className="move-controls"><form action={movePlanItem.bind(null, tripId, item.id, "earlier")}><button className="secondary">Move earlier</button></form><form action={movePlanItem.bind(null, tripId, item.id, "later")}><button className="secondary">Move later</button></form></div><form action={deletePlanItem.bind(null, tripId, item.id)} className="remove-form"><p>Remove this item from the shared trip?</p><button className="danger-button" type="submit">Remove item</button></form></div></details> : null}
+  </article>;
+}
 
 export default async function TripPage({ params, searchParams }: { params: Promise<{ tripId: string }>; searchParams: Promise<{ error?: string; notice?: string }> }) {
-  const { tripId } = await params;
-  if (!z.string().uuid().safeParse(tripId).success) notFound();
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) redirect("/auth");
-
-  const [{ data: tripData }, { data: memberData }] = await Promise.all([
+  const { tripId } = await params; if (!z.string().uuid().safeParse(tripId).success) notFound();
+  const supabase = await createClient(); const { data: claims } = await supabase.auth.getClaims(); const userId = claims?.claims?.sub; if (!userId) redirect("/auth");
+  const [{ data: tripData }, { data: memberData }, { data: destinationData }, { data: itemData }, { data: ideaData }] = await Promise.all([
     supabase.from("trips").select("id,name,origin,start_date,end_date,primary_currency").eq("id", tripId).maybeSingle(),
     supabase.from("trip_members").select("user_id,role,status,profiles(display_name,avatar_url)").eq("trip_id", tripId).eq("status", "active"),
+    supabase.from("destinations").select("id,trip_id,name,start_date,end_date,sort_order,notes").eq("trip_id", tripId).order("sort_order"),
+    supabase.from("plan_items").select("id,trip_id,item_type,title,destination_id,end_destination_id,item_date,end_date,start_time,end_time,sort_order,location,provider,status,notes").eq("trip_id", tripId).order("sort_order"),
+    supabase.from("ideas").select("id,trip_id,destination_id,title,link,category,notes,status,scheduled_plan_item_id").eq("trip_id", tripId).eq("status", "unscheduled").order("created_at", { ascending: false }),
   ]);
-  if (!tripData) notFound();
-  const trip = tripData as TripSummary;
-  const members = (memberData ?? []) as unknown as TripMember[];
-  const currentMember = members.find((member) => member.user_id === userId);
-  if (!currentMember) notFound();
-  const canEdit = currentMember.role === "owner" || currentMember.role === "planner";
-  const isOwner = currentMember.role === "owner";
-  const { data: inviteData } = canEdit
-    ? await supabase.from("trip_invites").select("id,email,role,expires_at,accepted_at,revoked_at").eq("trip_id", tripId).order("created_at", { ascending: false })
-    : { data: [] };
-  const invites = (inviteData ?? []) as TripInvite[];
-  const message = await searchParams;
+  if (!tripData) notFound(); const trip = tripData as TripSummary; const members = (memberData ?? []) as unknown as TripMember[]; const currentMember = members.find((member) => member.user_id === userId); if (!currentMember) notFound();
+  const canAdmin = currentMember.role === "owner" || currentMember.role === "planner"; const canPlan = currentMember.role !== "viewer"; const isOwner = currentMember.role === "owner";
+  const destinations = (destinationData ?? []) as Destination[]; const items = (itemData ?? []) as PlanItem[]; const ideas = (ideaData ?? []) as Idea[]; const destinationNames = new Map(destinations.map((destination) => [destination.id, destination.name]));
+  const { data: inviteData } = canAdmin ? await supabase.from("trip_invites").select("id,email,role,expires_at,accepted_at,revoked_at").eq("trip_id", tripId).order("created_at", { ascending: false }) : { data: [] }; const invites = (inviteData ?? []) as TripInvite[]; const message = await searchParams; const nights = trip.start_date && trip.end_date ? nightsBetween(trip.start_date, trip.end_date) : null;
+  return <main className="app-shell visual-trip-shell">
+    <header className="app-header"><Link className="wordmark" href="/app">SUN</Link><Link className="text-link" href="/app">All trips</Link></header>
+    <section className="visual-trip-header"><div><p className="eyebrow">From {trip.origin ?? "Needs checking"}</p><h1>{trip.name}</h1><p className="lede">{formatTripDates(trip.start_date, trip.end_date)}{nights !== null ? ` · ${nights} nights` : ""} · {trip.primary_currency}</p></div><div className="trip-context-actions"><div className="avatar-stack" aria-label={`${members.length} travellers`}>{members.slice(0, 5).map((member) => <span className="avatar" key={member.user_id} title={member.profiles?.display_name ?? member.role}>{initials(member.profiles?.display_name ?? null)}</span>)}{members.length > 5 ? <span className="avatar">+{members.length - 5}</span> : null}</div>{canAdmin ? <a className="round-action" href="#travellers" aria-label="Invite a traveller">+</a> : null}<details className="context-menu"><summary aria-label="Trip settings">•••</summary><div className="sheet-card admin-sheet"><h3>Trip settings</h3><form action={updateTrip.bind(null, tripId)} className="sheet-form"><label>Trip name<input name="name" defaultValue={trip.name} required /></label><label>Starting from<input name="origin" defaultValue={trip.origin ?? ""} required /></label><div className="field-row"><label>Start<input type="date" name="startDate" defaultValue={trip.start_date ?? ""} required /></label><label>End<input type="date" name="endDate" defaultValue={trip.end_date ?? ""} required /></label></div><label>Currency<input name="currency" defaultValue={trip.primary_currency} required pattern="[A-Z]{3}" /></label><button className="primary">Save trip details</button></form><hr /><form action={isOwner ? deleteTrip.bind(null, tripId) : leaveTrip.bind(null, tripId)} className="remove-form"><p>{isOwner ? "Permanently delete this trip and remove access for everyone. This cannot be undone." : "Leave this trip and lose access until invited again."}</p><button className="danger-button">{isOwner ? "Delete trip" : "Leave trip"}</button></form></div></details></div></section>
+    <nav className="trip-tabs" aria-label="Trip sections"><a aria-current="page" href="#trip">Trip</a><span aria-disabled="true">Explore</span><a href="#ideas">Ideas</a><span aria-disabled="true">Money</span><span aria-disabled="true">Check</span></nav>{message.error ? <p className="auth-message error" role="alert">{message.error}</p> : null}{message.notice ? <p className="auth-message notice">{message.notice}</p> : null}
+    <section id="trip" className="journey-ribbon" aria-label="Journey route"><div className="journey-node origin-node"><span>Start</span><strong>{trip.origin ?? "Origin missing"}</strong></div>{destinations.map((destination) => <div className="journey-segment" key={destination.id}><span className="journey-arrow">→</span><a href={`#destination-${destination.id}`} className="journey-node"><strong>{destination.name}</strong><span>{nightsBetween(destination.start_date, destination.end_date)} nights</span></a></div>)}<div className="journey-segment"><span className="journey-arrow">→</span><div className="journey-node origin-node"><span>Return</span><strong>{trip.origin ?? "Origin missing"}</strong></div></div></section>
+    {destinations.length === 0 ? <section className="empty-state planning-empty"><p className="eyebrow">Your journey starts here</p><h2>Where to first?</h2><p>Add the first place you will stay. Dates can be changed later.</p>{canPlan ? <details className="add-sheet"><summary className="button primary">+ Add destination</summary><div className="sheet-card"><DestinationForm tripId={tripId} /></div></details> : null}</section> : null}
+    <div className="itinerary-stack">{destinations.map((destination, index) => { const destinationItems = items.filter((item) => item.destination_id === destination.id && item.item_type !== "transport"); const stays = destinationItems.filter((item) => item.item_type === "stay"); const datedItems = destinationItems.filter((item) => item.item_type !== "stay"); const transport = items.find((item) => item.item_type === "transport" && item.destination_id === destination.id && item.end_destination_id === destinations[index + 1]?.id); const linkedCount = items.filter((item) => item.destination_id === destination.id || item.end_destination_id === destination.id).length;
+      return <section className="destination-block" id={`destination-${destination.id}`} key={destination.id}><header className="destination-heading"><div><p className="eyebrow">Stop {index + 1}</p><h2>{destination.name}</h2><p>{formatShortRange(destination.start_date, destination.end_date)} · {nightsBetween(destination.start_date, destination.end_date)} nights</p></div>{canPlan ? <DestinationEditor tripId={tripId} destination={destination} index={index} total={destinations.length} linkedCount={linkedCount} /> : null}</header><div className="stay-band">{stays.length ? stays.map((stay) => <ItemCard key={stay.id} tripId={tripId} item={stay} destinationNames={destinationNames} canPlan={canPlan} />) : <div><strong>{nightsBetween(destination.start_date, destination.end_date)} nights need accommodation</strong><span>Stay not added yet</span></div>}</div><div className="day-timeline">{dateRange(destination.start_date, destination.end_date).map((day) => { const dayItems = datedItems.filter((item) => item.item_date === day); return <article className="day-row" key={day}><time dateTime={day}>{formatDay(day)}</time><div className="day-content">{dayItems.length ? dayItems.map((item) => <ItemCard key={item.id} tripId={tripId} item={item} destinationNames={destinationNames} canPlan={canPlan} />) : <div className="empty-day"><strong>Nothing planned</strong><span>Leave it open or add something.</span></div>}</div></article>; })}</div>{index < destinations.length - 1 ? <div className="transport-connector"><span className="connector-line" />{transport ? <ItemCard tripId={tripId} item={transport} destinationNames={destinationNames} canPlan={canPlan} /> : <div><strong>Getting to {destinations[index + 1].name} not added yet</strong><span>Transport details can stay incomplete.</span></div>}</div> : null}</section>; })}</div>
+    {canPlan ? <section className="planning-actions"><details className="add-sheet"><summary className="button primary">+ Add something</summary><div className="sheet-card"><h3>Add to {trip.name}</h3><PlanningForm tripId={tripId} destinations={destinations} /></div></details><details className="add-sheet"><summary className="button secondary">+ Add destination</summary><div className="sheet-card"><DestinationForm tripId={tripId} /></div></details></section> : null}
+    <section id="ideas" className="ideas-section"><div className="section-heading"><div><p className="eyebrow">Possibilities</p><h2>Ideas</h2><p>Save places and possibilities here before deciding when to do them.</p></div>{canPlan ? <details className="add-sheet"><summary className="button secondary">+ Add idea</summary><div className="sheet-card"><h3>Save an idea</h3><form action={createIdea.bind(null, tripId)} className="sheet-form"><label>Idea<input name="title" required /></label><label>Destination<select name="destinationId" defaultValue=""><option value="">Anywhere</option>{destinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.name}</option>)}</select></label><label>Category<input name="category" defaultValue="other" required /></label><label>Link<input type="url" name="link" /></label><label>Notes<textarea name="notes" rows={3} /></label><button className="primary">Keep as idea</button></form></div></details> : null}</div>{ideas.length ? <div className="idea-grid">{ideas.map((idea) => <article className="idea-card" key={idea.id}><span>{idea.category}</span><h3>{idea.title}</h3><p>{destinationNames.get(idea.destination_id ?? "") ?? "Any destination"}</p>{idea.link ? <a href={idea.link} rel="noreferrer" target="_blank">Open link</a> : null}{canPlan && destinations.length ? <details><summary className="text-button">Schedule</summary><form action={scheduleIdea.bind(null, tripId, idea.id)} className="mini-form"><label>Where<select name="destinationId" required>{destinations.map((destination) => <option key={destination.id} value={destination.id}>{destination.name}</option>)}</select></label><label>When<input type="date" name="itemDate" required /></label><button className="primary">Add to itinerary</button></form></details> : null}</article>)}</div> : <p className="soft-empty">No Ideas yet. This is a place for possibilities, not unfinished tasks.</p>}</section>
+    <details id="travellers" className="traveller-management"><summary>Manage travellers · {members.length}</summary><div className="panel"><div className="member-list">{members.map((member) => <article className="member-row" key={member.user_id}><span className="avatar">{initials(member.profiles?.display_name ?? null)}</span><div className="member-copy"><strong>{member.user_id === userId ? "You" : member.profiles?.display_name ?? "Traveller"}</strong><span>{member.role}</span></div>{isOwner && member.role !== "owner" ? <div className="member-actions"><form action={changeMemberRole.bind(null, tripId, member.user_id)}><select name="role" defaultValue={member.role}>{tripRoles.map((role) => <option key={role}>{role}</option>)}</select><button className="text-button">Update</button></form><form action={removeMember.bind(null, tripId, member.user_id)}><button className="text-button danger-text">Remove</button></form></div> : null}</article>)}</div>{canAdmin ? <InviteForm tripId={tripId} /> : null}{canAdmin && invites.length ? <div className="invite-list"><h3>Pending invites</h3>{invites.map((invite) => { const active = !invite.accepted_at && !invite.revoked_at && new Date(invite.expires_at) > new Date(); return <article className="invite-row" key={invite.id}><div><strong>{invite.email}</strong><span>{invite.role} · {active ? "pending" : invite.accepted_at ? "accepted" : invite.revoked_at ? "revoked" : "expired"}</span></div>{active ? <form action={revokeInvite.bind(null, tripId, invite.id)}><button className="text-button danger-text">Revoke</button></form> : null}</article>; })}</div> : null}</div></details>
+  </main>;
+}
 
-  return (
-    <main className="app-shell trip-detail-shell">
-      <header className="app-header"><Link className="wordmark" href="/app">SUN</Link><Link className="text-link" href="/app">All trips</Link></header>
-      <section className="trip-hero">
-        <div><p className="eyebrow">From {trip.origin ?? "Needs checking"}</p><h1>{trip.name}</h1><p className="lede">{formatTripDates(trip.start_date, trip.end_date)} · {trip.primary_currency}</p></div>
-        <div className="avatar-stack" aria-label={`${members.length} trip members`}>
-          {members.slice(0, 5).map((member) => <span className="avatar" key={member.user_id} title={member.profiles?.display_name ?? member.role}>{initials(member.profiles?.display_name ?? null)}</span>)}
-          {members.length > 5 ? <span className="avatar">+{members.length - 5}</span> : null}
-        </div>
-      </section>
-      <nav className="trip-tabs" aria-label="Trip sections">
-        <span aria-current="page">Trip</span><span aria-disabled="true">Explore</span><span aria-disabled="true">Ideas</span><span aria-disabled="true">Money</span><span aria-disabled="true">Check</span>
-      </nav>
-      {message.error ? <p className="auth-message error" role="alert">{message.error}</p> : null}
-      {message.notice ? <p className="auth-message notice">{message.notice}</p> : null}
-
-      <div className="detail-grid">
-        <section className="panel" aria-labelledby="details-title">
-          <div className="section-heading"><div><p className="eyebrow">Canonical trip</p><h2 id="details-title">Trip details</h2></div><span className="role-badge">{currentMember.role}</span></div>
-          {canEdit ? (
-            <form action={updateTrip.bind(null, tripId)} className="trip-form compact-form">
-              <label htmlFor="name">Trip name</label><input id="name" name="name" defaultValue={trip.name} required maxLength={120} />
-              <label htmlFor="origin">Starting from</label><input id="origin" name="origin" defaultValue={trip.origin ?? ""} required maxLength={120} />
-              <div className="field-row"><div><label htmlFor="startDate">Start date</label><input id="startDate" name="startDate" type="date" defaultValue={trip.start_date ?? ""} required /></div><div><label htmlFor="endDate">End date</label><input id="endDate" name="endDate" type="date" defaultValue={trip.end_date ?? ""} required /></div></div>
-              <label htmlFor="currency">Primary currency</label><select id="currency" name="currency" defaultValue={trip.primary_currency}>{['AUD','USD','EUR','GBP','NZD','JPY','THB','CHF'].map((currency) => <option key={currency}>{currency}</option>)}</select>
-              <button className="primary" type="submit">Save trip details</button>
-            </form>
-          ) : <dl className="facts"><div><dt>Starting from</dt><dd>{trip.origin}</dd></div><div><dt>Dates</dt><dd>{formatTripDates(trip.start_date, trip.end_date)}</dd></div><div><dt>Currency</dt><dd>{trip.primary_currency}</dd></div></dl>}
-        </section>
-
-        <section className="panel" aria-labelledby="members-title">
-          <div className="section-heading"><div><p className="eyebrow">Shared access</p><h2 id="members-title">Members · {members.length}</h2></div></div>
-          <div className="member-list">
-            {members.map((member) => (
-              <article className="member-row" key={member.user_id}>
-                <span className="avatar">{initials(member.profiles?.display_name ?? null)}</span>
-                <div className="member-copy"><strong>{member.user_id === userId ? "You" : member.profiles?.display_name ?? "Trip member"}</strong><span>{member.role}</span></div>
-                {isOwner && member.role !== "owner" ? <div className="member-actions"><form action={changeMemberRole.bind(null, tripId, member.user_id)}><select name="role" defaultValue={member.role} aria-label="Member role">{tripRoles.map((role) => <option key={role}>{role}</option>)}</select><button className="text-button" type="submit">Update</button></form><form action={removeMember.bind(null, tripId, member.user_id)}><button className="text-button danger-text" type="submit">Remove</button></form></div> : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      {canEdit ? <InviteForm tripId={tripId} /> : null}
-      {canEdit && invites.length ? <section className="panel"><div className="section-heading"><div><p className="eyebrow">Invitation history</p><h2>Invitations</h2></div></div><div className="invite-list">{invites.map((invite) => { const active = !invite.accepted_at && !invite.revoked_at && new Date(invite.expires_at) > new Date(); return <article className="invite-row" key={invite.id}><div><strong>{invite.email}</strong><span>{invite.role} · {invite.accepted_at ? "accepted" : invite.revoked_at ? "revoked" : active ? "pending" : "expired"}</span></div>{active ? <form action={revokeInvite.bind(null, tripId, invite.id)}><button className="text-button danger-text" type="submit">Revoke</button></form> : null}</article>; })}</div></section> : null}
-
-      <section className="panel danger-zone" aria-labelledby="access-title">
-        <div><p className="eyebrow">Access</p><h2 id="access-title">{isOwner ? "Delete this trip" : "Leave this trip"}</h2><p>{isOwner ? "Deletes the trip and all current Gate 3 membership records." : "You will immediately lose access unless invited again."}</p></div>
-        <form action={isOwner ? deleteTrip.bind(null, tripId) : leaveTrip.bind(null, tripId)}><button className="danger-button" type="submit">{isOwner ? "Delete trip" : "Leave trip"}</button></form>
-      </section>
-    </main>
-  );
+function DestinationForm({ tripId }: { tripId: string }) {
+  return <><h3>Add destination</h3><form action={createDestination.bind(null, tripId)} className="sheet-form"><label>Place<input name="name" required /></label><div className="field-row"><label>Arrive<input type="date" name="startDate" required /></label><label>Leave<input type="date" name="endDate" required /></label></div><label>Notes<textarea name="notes" rows={3} /></label><button className="primary">Add destination</button></form></>;
 }
