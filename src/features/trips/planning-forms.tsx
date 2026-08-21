@@ -20,6 +20,29 @@ import { createDestination, createIdea, createPlanItem, scheduleIdea, updateDest
 
 type TripDates = { start: string | null; end: string | null };
 
+type MobileAddChoice = "destination" | "idea" | PlanItem["item_type"];
+
+export function MobileAddMenu({ tripId, destinations, tripDates }: { tripId: string; destinations: Destination[]; tripDates: TripDates }) {
+  const [choice, setChoice] = useState<MobileAddChoice | null>(null);
+  const choices: { value: MobileAddChoice; label: string }[] = [
+    { value: "destination", label: "Destination" },
+    { value: "stay", label: "Stay" },
+    { value: "transport", label: "Transport" },
+    { value: "activity", label: "Activity" },
+    { value: "event", label: "Event" },
+    { value: "free_time", label: "Free time" },
+    { value: "idea", label: "Idea" },
+  ];
+
+  return <div className="mobile-add-menu">
+    {choice ? <button className="text-button mobile-add-back" type="button" onClick={() => setChoice(null)}>← Choose something else</button> : null}
+    {!choice ? <div className="mobile-add-grid" aria-label="Choose what to add">{choices.map((item) => <button className="mobile-add-choice" key={item.value} type="button" onClick={() => setChoice(item.value)}>{item.label}</button>)}</div> : null}
+    {choice === "destination" ? <DestinationForm tripId={tripId} tripDates={tripDates} /> : null}
+    {choice === "idea" ? <IdeaForm tripId={tripId} destinations={destinations} /> : null}
+    {choice && choice !== "destination" && choice !== "idea" ? <PlanningForm tripId={tripId} destinations={destinations} tripDates={tripDates} initialType={choice} /> : null}
+  </div>;
+}
+
 function Duration({ start, end, label = "nights" }: { start: string; end: string; label?: string }) {
   if (!start || !end || end < start) return null;
   const nights = nightsBetween(start, end);
