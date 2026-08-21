@@ -1,5 +1,6 @@
 export const planItemTypes = ["stay", "transport", "activity", "food_place", "event", "free_time", "custom"] as const;
 export const planItemStatuses = ["planned", "needs_checking", "confirmed", "booked"] as const;
+export const informationConfidences = ["unknown", "needs_checking", "estimated", "confirmed"] as const;
 
 export type Destination = {
   id: string;
@@ -26,6 +27,7 @@ export type PlanItem = {
   location: string | null;
   provider: string | null;
   status: (typeof planItemStatuses)[number];
+  confidence: (typeof informationConfidences)[number];
   notes: string | null;
 };
 
@@ -39,6 +41,14 @@ export type Idea = {
   notes: string | null;
   status: "unscheduled" | "scheduled";
   scheduled_plan_item_id: string | null;
+};
+
+export type DateContext = {
+  selectedDate?: string | null;
+  destinationStart?: string | null;
+  itemDate?: string | null;
+  transitionDate?: string | null;
+  tripStart?: string | null;
 };
 
 const dayFormatter = new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", weekday: "short", timeZone: "UTC" });
@@ -63,6 +73,18 @@ export function nightsBetween(start: string, end: string) {
   return Math.max(0, Math.round((utcDate(end).getTime() - utcDate(start).getTime()) / 86_400_000));
 }
 
+export function contextualDate(context: DateContext, fallback = new Date().toISOString().slice(0, 10)) {
+  return context.selectedDate ?? context.destinationStart ?? context.itemDate ?? context.transitionDate ?? context.tripStart ?? fallback;
+}
+
+export function isDateWithin(date: string, start?: string | null, end?: string | null) {
+  return (!start || date >= start) && (!end || date <= end);
+}
+
+export function journeyWidth(nights: number) {
+  return Math.min(240, Math.max(140, 128 + nights * 12));
+}
+
 export function formatDay(date: string) {
   return dayFormatter.format(utcDate(date)).toUpperCase();
 }
@@ -77,4 +99,8 @@ export function itemLabel(type: PlanItem["item_type"]) {
 
 export function statusLabel(status: PlanItem["status"]) {
   return ({ planned: "Planned", needs_checking: "Needs checking", confirmed: "Confirmed", booked: "Booked" })[status];
+}
+
+export function confidenceLabel(confidence: PlanItem["confidence"]) {
+  return ({ unknown: "Unknown", needs_checking: "Needs checking", estimated: "Estimated", confirmed: "Confirmed" })[confidence];
 }
