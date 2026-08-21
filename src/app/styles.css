@@ -147,6 +147,11 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
 .sheet-form label, .mini-form label { display: grid; gap: 7px; font-size: .84rem; font-weight: 700; }
 .sheet-form input, .sheet-form select, .sheet-form textarea, .mini-form input, .mini-form select { width: 100%; min-height: 48px; padding: 11px 13px; border: 1px solid #c8cbc5; border-radius: 12px; color: var(--ink); background: white; font: inherit; }
 .sheet-form textarea { resize: vertical; }
+.context-hint, .duration-preview { margin: 0; color: var(--muted); font-size: .78rem; line-height: 1.45; }
+.duration-preview { color: var(--accent); font-weight: 750; }
+.more-fields { padding: 10px 0; border-top: 1px solid var(--line); }
+.more-fields > summary { color: var(--muted); font-size: .84rem; font-weight: 700; cursor: pointer; }
+.more-fields[open] > summary { margin-bottom: 12px; }
 .move-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 22px 0; }
 .move-controls form, .move-controls button { width: 100%; }
 .remove-form { margin-top: 24px; padding-top: 22px; border-top: 1px solid #e3c7c2; }
@@ -171,11 +176,12 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
 .stay-band > div { display: grid; gap: 5px; }
 .stay-band span { color: var(--muted); font-size: .86rem; }
 .day-timeline { padding: 18px clamp(18px, 4vw, 38px) 34px; }
-.day-row { display: grid; grid-template-columns: minmax(110px, .28fr) minmax(0, 1fr); gap: 22px; padding: 22px 0; border-bottom: 1px solid var(--line); }
+.day-row { display: grid; grid-template-columns: minmax(110px, .28fr) minmax(0, 1fr); gap: 22px; padding: 15px 0; border-bottom: 1px solid var(--line); }
 .day-row:last-child { border-bottom: 0; }
 .day-row time { padding-top: 5px; color: var(--muted); font: 650 .78rem/1.3 var(--font-mono), monospace; letter-spacing: .05em; }
 .day-content { display: grid; gap: 10px; }
-.empty-day { display: grid; gap: 4px; min-height: 72px; align-content: center; color: var(--muted); }
+.empty-day { display: grid; grid-template-columns: auto 1fr; gap: 8px; min-height: 42px; align-content: center; align-items: baseline; color: var(--muted); }
+.empty-day span { font-size: .82rem; }
 .empty-day strong { color: var(--ink); }
 .plan-item { padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: white; }
 .plan-item h4 { margin: 8px 0 6px; font-size: 1.05rem; }
@@ -189,11 +195,18 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
 .connector-line { width: 3px; min-height: 72px; border-radius: 3px; background: var(--accent); }
 .transport-connector > div { display: grid; gap: 4px; padding: 14px 0; color: var(--muted); }
 .transport-connector > div strong { color: var(--ink); }
+.inline-add { margin-top: 5px; }
 .planning-actions { position: sticky; z-index: 8; bottom: 14px; display: flex; justify-content: center; gap: 9px; margin: 42px 0; }
 .add-sheet { position: relative; }
 .add-sheet[open]::before, .context-menu[open]::before { content: ""; position: fixed; z-index: 19; inset: 0; background: rgb(23 33 29 / 28%); }
-.ideas-section { scroll-margin-top: 18px; margin-top: 54px; padding: clamp(24px, 5vw, 42px); border: 1px solid var(--line); border-radius: 28px; background: #f2efe6; }
+.ideas-section { scroll-margin-top: 18px; margin-top: 54px; padding: clamp(24px, 5vw, 34px); border: 1px solid var(--line); border-radius: 24px; background: #f2efe6; }
 .ideas-section .section-heading p:last-child { color: var(--muted); }
+.ideas-preview { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.ideas-preview h2 { margin: 0; }
+.ideas-preview p:last-child { margin-bottom: 0; color: var(--muted); }
+.ideas-workspace { scroll-margin-top: 18px; margin-top: 14px; padding: 18px; border: 1px solid var(--line); border-radius: 20px; background: var(--card); }
+.ideas-workspace > summary { font-weight: 750; cursor: pointer; }
+.ideas-workspace[open] > summary { margin-bottom: 18px; }
 .idea-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .idea-card { padding: 18px; border-radius: 17px; background: var(--card); }
 .idea-card > span { color: var(--accent); font-size: .72rem; font-weight: 800; text-transform: uppercase; }
@@ -202,6 +215,7 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
 .idea-card details { margin-top: 12px; }
 .mini-form { margin-top: 12px; }
 .soft-empty { margin: 0; padding: 24px; border: 1px dashed #cbc8bd; border-radius: 16px; color: var(--muted); }
+.toast-notice { position: fixed; z-index: 30; right: 20px; bottom: 20px; max-width: min(360px, calc(100vw - 40px)); margin: 0; padding: 13px 16px; border: 1px solid #b9d8ca; border-radius: 14px; color: #215d4d; background: #eaf7f0; box-shadow: 0 14px 48px rgb(23 33 29 / 18%); }
 .traveller-management { margin-top: 28px; }
 .traveller-management > summary { padding: 16px 4px; color: var(--muted); font-weight: 700; cursor: pointer; }
 .traveller-management .panel { margin-top: 8px; }
@@ -221,6 +235,7 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
   .planning-actions .button { width: 100%; padding-inline: 10px; }
   .idea-grid { grid-template-columns: 1fr; }
   .ideas-section { padding: 22px 18px; }
+  .ideas-preview { align-items: stretch; flex-direction: column; }
   .ideas-section .section-heading { align-items: stretch; flex-direction: column; }
   .ideas-section .button { width: 100%; }
 }
