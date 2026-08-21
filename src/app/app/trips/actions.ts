@@ -50,6 +50,26 @@ function safeDatabaseMessage(message?: string) {
   return "We couldn’t save that change. Please try again.";
 }
 
+type DatabaseError = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+};
+
+function planningDatabaseFailure(operation: string, error: DatabaseError) {
+  // Server-only structured diagnostics. Deliberately exclude form values, user
+  // identifiers, tokens, and other traveller data from deployment logs.
+  console.error("[trip-planning] database operation failed", {
+    operation,
+    code: error.code ?? "unknown",
+    message: error.message ?? "Unknown database error",
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  });
+  return safeDatabaseMessage(error.message);
+}
+
 function optional(formData: FormData, key: string) {
   const value = formData.get(key);
   return typeof value === "string" && value !== "" ? value : null;
@@ -179,9 +199,10 @@ export async function createDestination(tripId: string, formData: FormData) {
   const parsed = destinationSchema.safeParse({ name: formData.get("name"), startDate: formData.get("startDate"), endDate: formData.get("endDate"), notes: formData.get("notes") });
   if (!parsed.success) redirect(messagePath(path, "error", parsed.error.issues[0]?.message ?? "Check the destination."));
   const supabase = await authenticatedClient();
-  const { data: last } = await supabase.from("destinations").select("sort_order").eq("trip_id", tripId).order("sort_order", { ascending: false }).limit(1).maybeSingle();
+  const { data: last, error: orderError } = await supabase.from("destinations").select("sort_order").eq("trip_id", tripId).order("sort_order", { ascending: false }).limit(1).maybeSingle();
+  if (orderError) redirect(messagePath(path, "error", planningDatabaseFailure("destination.read-order", orderError)));
   const { error } = await supabase.from("destinations").insert({ trip_id: tripId, name: parsed.data.name, start_date: parsed.data.startDate, end_date: parsed.data.endDate, notes: parsed.data.notes, sort_order: (last?.sort_order ?? -1) + 1 });
-  if (error) redirect(messagePath(path, "error", safeDatabaseMessage(error.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("destination.create", error)));
   revalidatePath(path); redirect(messagePath(path, "notice", `${parsed.data.name} added.`));
 }
 
@@ -192,7 +213,8 @@ export async function updateDestination(tripId: string, destinationId: string, f
   if (!parsed.success) redirect(messagePath(path, "error", parsed.error.issues[0]?.message ?? "Check the destination."));
   const supabase = await authenticatedClient();
   const { data, error } = await supabase.from("destinations").update({ name: parsed.data.name, start_date: parsed.data.startDate, end_date: parsed.data.endDate, notes: parsed.data.notes }).eq("id", destinationId).eq("trip_id", tripId).select("id").maybeSingle();
-  if (error || !data) redirect(messagePath(path, "error", safeDatabaseMessage(error?.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("destination.update", error)));
+  if (!data) redirect(messagePath(path, "error", "Destination not found or you do not have permission to edit it."));
   revalidatePath(path); redirect(messagePath(path, "notice", "Destination updated."));
 }
 
@@ -201,7 +223,7 @@ export async function moveDestination(tripId: string, destinationId: string, dir
   if (!uuid.safeParse(tripId).success || !uuid.safeParse(destinationId).success) redirect(path);
   const supabase = await authenticatedClient();
   const { data: rows, error } = await supabase.from("destinations").select("id,sort_order").eq("trip_id", tripId).order("sort_order");
-  if (error) redirect(messagePath(path, "error", safeDatabaseMessage(error.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("destination.read-order", error)));
   const index = rows?.findIndex((row) => row.id === destinationId) ?? -1;
   const swapIndex = direction === "earlier" ? index - 1 : index + 1;
   if (!rows || index < 0 || swapIndex < 0 || swapIndex >= rows.length) redirect(path);
@@ -210,7 +232,7 @@ export async function moveDestination(tripId: string, destinationId: string, dir
   const first = await supabase.from("destinations").update({ sort_order: temporaryOrder }).eq("id", current.id).eq("trip_id", tripId);
   const second = first.error ? first : await supabase.from("destinations").update({ sort_order: current.sort_order }).eq("id", swap.id).eq("trip_id", tripId);
   const third = second.error ? second : await supabase.from("destinations").update({ sort_order: swap.sort_order }).eq("id", current.id).eq("trip_id", tripId);
-  if (third.error) redirect(messagePath(path, "error", safeDatabaseMessage(third.error.message)));
+  if (third.error) redirect(messagePath(path, "error", planningDatabaseFailure("destination.reorder", third.error)));
   revalidatePath(path); redirect(path);
 }
 
@@ -219,7 +241,8 @@ export async function deleteDestination(tripId: string, destinationId: string) {
   if (!uuid.safeParse(tripId).success || !uuid.safeParse(destinationId).success) redirect(path);
   const supabase = await authenticatedClient();
   const { data, error } = await supabase.from("destinations").delete().eq("id", destinationId).eq("trip_id", tripId).select("id").maybeSingle();
-  if (error || !data) redirect(messagePath(path, "error", safeDatabaseMessage(error?.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("destination.delete", error)));
+  if (!data) redirect(messagePath(path, "error", "Destination not found or you do not have permission to remove it."));
   revalidatePath(path); redirect(messagePath(path, "notice", "Destination and its linked planning items removed."));
 }
 
@@ -229,9 +252,10 @@ export async function createPlanItem(tripId: string, formData: FormData) {
   const parsed = planItemSchema.safeParse({ type: formData.get("type"), title: formData.get("title"), destinationId: optional(formData, "destinationId"), endDestinationId: optional(formData, "endDestinationId"), itemDate: optional(formData, "itemDate"), endDate: optional(formData, "endDate"), startTime: optional(formData, "startTime"), endTime: optional(formData, "endTime"), location: formData.get("location"), provider: formData.get("provider"), status: formData.get("status"), notes: formData.get("notes") });
   if (!parsed.success) redirect(messagePath(path, "error", parsed.error.issues[0]?.message ?? "Check the item."));
   const supabase = await authenticatedClient();
-  const { data: last } = await supabase.from("plan_items").select("sort_order").eq("trip_id", tripId).eq("item_date", parsed.data.itemDate).order("sort_order", { ascending: false }).limit(1).maybeSingle();
+  const { data: last, error: orderError } = await supabase.from("plan_items").select("sort_order").eq("trip_id", tripId).eq("item_date", parsed.data.itemDate).order("sort_order", { ascending: false }).limit(1).maybeSingle();
+  if (orderError) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.read-order", orderError)));
   const { error } = await supabase.from("plan_items").insert({ trip_id: tripId, item_type: parsed.data.type, title: parsed.data.title, destination_id: parsed.data.destinationId, end_destination_id: parsed.data.endDestinationId, item_date: parsed.data.itemDate, end_date: parsed.data.endDate, start_time: parsed.data.startTime, end_time: parsed.data.endTime, sort_order: (last?.sort_order ?? -1) + 1, location: parsed.data.location, provider: parsed.data.provider, status: parsed.data.status, notes: parsed.data.notes });
-  if (error) redirect(messagePath(path, "error", safeDatabaseMessage(error.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.create", error)));
   revalidatePath(path); redirect(messagePath(path, "notice", "Plan updated."));
 }
 
@@ -242,7 +266,8 @@ export async function updatePlanItem(tripId: string, itemId: string, formData: F
   if (!parsed.success) redirect(messagePath(path, "error", parsed.error.issues[0]?.message ?? "Check the item."));
   const supabase = await authenticatedClient();
   const { data, error } = await supabase.from("plan_items").update({ item_type: parsed.data.type, title: parsed.data.title, destination_id: parsed.data.destinationId, end_destination_id: parsed.data.endDestinationId, item_date: parsed.data.itemDate, end_date: parsed.data.endDate, start_time: parsed.data.startTime, end_time: parsed.data.endTime, location: parsed.data.location, provider: parsed.data.provider, status: parsed.data.status, notes: parsed.data.notes }).eq("id", itemId).eq("trip_id", tripId).select("id").maybeSingle();
-  if (error || !data) redirect(messagePath(path, "error", safeDatabaseMessage(error?.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.update", error)));
+  if (!data) redirect(messagePath(path, "error", "Item not found or you do not have permission to edit it."));
   revalidatePath(path); redirect(messagePath(path, "notice", "Item updated."));
 }
 
@@ -260,7 +285,7 @@ export async function movePlanItem(tripId: string, itemId: string, direction: "e
   const first = await supabase.from("plan_items").update({ sort_order: temporary }).eq("id", itemId).eq("trip_id", tripId);
   const second = first.error ? first : await supabase.from("plan_items").update({ sort_order: current.sort_order }).eq("id", adjacent.id).eq("trip_id", tripId);
   const third = second.error ? second : await supabase.from("plan_items").update({ sort_order: adjacent.sort_order }).eq("id", itemId).eq("trip_id", tripId);
-  if (third.error) redirect(messagePath(path, "error", safeDatabaseMessage(third.error.message)));
+  if (third.error) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.reorder", third.error)));
   revalidatePath(path); redirect(path);
 }
 
@@ -269,7 +294,8 @@ export async function deletePlanItem(tripId: string, itemId: string) {
   if (!uuid.safeParse(itemId).success) redirect(path);
   const supabase = await authenticatedClient();
   const { data, error } = await supabase.from("plan_items").delete().eq("id", itemId).eq("trip_id", tripId).select("id").maybeSingle();
-  if (error || !data) redirect(messagePath(path, "error", safeDatabaseMessage(error?.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.delete", error)));
+  if (!data) redirect(messagePath(path, "error", "Item not found or you do not have permission to remove it."));
   revalidatePath(path); redirect(messagePath(path, "notice", "Item removed."));
 }
 
@@ -279,7 +305,7 @@ export async function createIdea(tripId: string, formData: FormData) {
   if (!uuid.safeParse(tripId).success || !parsed.success) redirect(messagePath(path, "error", parsed.success ? "Trip not found." : parsed.error.issues[0]?.message ?? "Check the idea."));
   const supabase = await authenticatedClient();
   const { error } = await supabase.from("ideas").insert({ trip_id: tripId, title: parsed.data.title, destination_id: parsed.data.destinationId, link: parsed.data.link, category: parsed.data.category, notes: parsed.data.notes });
-  if (error) redirect(messagePath(path, "error", safeDatabaseMessage(error.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("idea.create", error)));
   revalidatePath(path); redirect(messagePath(path, "notice", "Idea saved for later."));
 }
 
@@ -290,6 +316,6 @@ export async function scheduleIdea(tripId: string, ideaId: string, formData: For
   if (!uuid.safeParse(ideaId).success || !destinationId.success || !date.success) redirect(messagePath(path, "error", "Choose a destination and date."));
   const supabase = await authenticatedClient();
   const { error } = await supabase.rpc("schedule_trip_idea", { target_idea_id: ideaId, target_destination_id: destinationId.data, target_date: date.data });
-  if (error) redirect(messagePath(path, "error", safeDatabaseMessage(error.message)));
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("idea.schedule", error)));
   revalidatePath(path); redirect(messagePath(path, "notice", "Idea scheduled."));
 }
