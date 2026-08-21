@@ -11,6 +11,9 @@ export function safeDestination(value: string | null | undefined, fallback = "/a
 }
 
 export function getRouteDecision(pathname: string, isAuthenticated: boolean): RouteDecision {
+  if (pathname === "/") {
+    return { type: "redirect", pathname: isAuthenticated ? "/app" : "/auth" };
+  }
   const isProtected = pathname === "/app" || pathname.startsWith("/app/");
   if (isProtected && !isAuthenticated) {
     return { type: "redirect", pathname: "/auth", next: pathname };
