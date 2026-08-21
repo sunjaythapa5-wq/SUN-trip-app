@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { tripRoles } from "@/features/trips/types";
-import { planItemStatuses, planItemTypes } from "@/features/trips/planning";
+import { informationConfidences, planItemStatuses, planItemTypes } from "@/features/trips/planning";
 
 const uuid = z.string().uuid();
 const tripSchema = z.object({
@@ -24,13 +24,13 @@ const planItemSchema = z.object({
   type: z.enum(planItemTypes), title: z.string().trim().min(1).max(160), destinationId: z.string().uuid().nullable(),
   endDestinationId: z.string().uuid().nullable(), itemDate: z.iso.date().nullable(), endDate: z.iso.date().nullable(),
   startTime: z.string().regex(/^\d{2}:\d{2}$/).nullable(), endTime: z.string().regex(/^\d{2}:\d{2}$/).nullable(),
-  location: nullableText(240), provider: nullableText(160), status: z.enum(planItemStatuses), notes: nullableText(),
+  location: nullableText(240), provider: nullableText(160), status: z.enum(planItemStatuses), confidence: z.enum(informationConfidences), notes: nullableText(),
 }).superRefine((value, context) => {
   if (value.type === "transport" && (!value.destinationId || !value.endDestinationId)) context.addIssue({ code: "custom", message: "Transport needs a start and end destination." });
   if (value.type === "stay" && (!value.destinationId || !value.itemDate || !value.endDate)) context.addIssue({ code: "custom", message: "A stay needs a destination, check-in and check-out." });
   if (value.endDate && value.itemDate && value.endDate < value.itemDate) context.addIssue({ code: "custom", message: "End date must be on or after the start date." });
 });
-const ideaSchema = z.object({ title: z.string().trim().min(1).max(160), destinationId: z.string().uuid().nullable(), link: z.union([z.url(), z.literal("")]).transform((value) => value || null), category: z.string().trim().min(1).max(60), notes: nullableText() });
+const ideaSchema = z.object({ title: z.string().trim().min(1).max(160), destinationId: z.string().uuid().nullable(), link: z.union([z.url(), z.literal("")]).transform((value) => value || null), category: z.string().trim().max(60).transform((value) => value || "other"), notes: nullableText() });
 
 export type InviteState = { error?: string; invitePath?: string; email?: string };
 
@@ -249,12 +249,12 @@ export async function deleteDestination(tripId: string, destinationId: string) {
 export async function createPlanItem(tripId: string, formData: FormData) {
   const path = `/app/trips/${tripId}`;
   if (!uuid.safeParse(tripId).success) redirect("/app");
-  const parsed = planItemSchema.safeParse({ type: formData.get("type"), title: formData.get("title"), destinationId: optional(formData, "destinationId"), endDestinationId: optional(formData, "endDestinationId"), itemDate: optional(formData, "itemDate"), endDate: optional(formData, "endDate"), startTime: optional(formData, "startTime"), endTime: optional(formData, "endTime"), location: formData.get("location"), provider: formData.get("provider"), status: formData.get("status"), notes: formData.get("notes") });
+  const parsed = planItemSchema.safeParse({ type: formData.get("type"), title: formData.get("title"), destinationId: optional(formData, "destinationId"), endDestinationId: optional(formData, "endDestinationId"), itemDate: optional(formData, "itemDate"), endDate: optional(formData, "endDate"), startTime: optional(formData, "startTime"), endTime: optional(formData, "endTime"), location: formData.get("location"), provider: formData.get("provider"), status: formData.get("status"), confidence: formData.get("confidence"), notes: formData.get("notes") });
   if (!parsed.success) redirect(messagePath(path, "error", parsed.error.issues[0]?.message ?? "Check the item."));
   const supabase = await authenticatedClient();
   const { data: last, error: orderError } = await supabase.from("plan_items").select("sort_order").eq("trip_id", tripId).eq("item_date", parsed.data.itemDate).order("sort_order", { ascending: false }).limit(1).maybeSingle();
   if (orderError) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.read-order", orderError)));
-  const { error } = await supabase.from("plan_items").insert({ trip_id: tripId, item_type: parsed.data.type, title: parsed.data.title, destination_id: parsed.data.destinationId, end_destination_id: parsed.data.endDestinationId, item_date: parsed.data.itemDate, end_date: parsed.data.endDate, start_time: parsed.data.startTime, end_time: parsed.data.endTime, sort_order: (last?.sort_order ?? -1) + 1, location: parsed.data.location, provider: parsed.data.provider, status: parsed.data.status, notes: parsed.data.notes });
+  const { error } = await supabase.from("plan_items").insert({ trip_id: tripId, item_type: parsed.data.type, title: parsed.data.title, destination_id: parsed.data.destinationId, end_destination_id: parsed.data.endDestinationId, item_date: parsed.data.itemDate, end_date: parsed.data.endDate, start_time: parsed.data.startTime, end_time: parsed.data.endTime, sort_order: (last?.sort_order ?? -1) + 1, location: parsed.data.location, provider: parsed.data.provider, status: parsed.data.status, confidence: parsed.data.confidence, notes: parsed.data.notes });
   if (error) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.create", error)));
   revalidatePath(path); redirect(messagePath(path, "notice", "Plan updated."));
 }
@@ -262,10 +262,10 @@ export async function createPlanItem(tripId: string, formData: FormData) {
 export async function updatePlanItem(tripId: string, itemId: string, formData: FormData) {
   const path = `/app/trips/${tripId}`;
   if (!uuid.safeParse(tripId).success || !uuid.safeParse(itemId).success) redirect(path);
-  const parsed = planItemSchema.safeParse({ type: formData.get("type"), title: formData.get("title"), destinationId: optional(formData, "destinationId"), endDestinationId: optional(formData, "endDestinationId"), itemDate: optional(formData, "itemDate"), endDate: optional(formData, "endDate"), startTime: optional(formData, "startTime"), endTime: optional(formData, "endTime"), location: formData.get("location"), provider: formData.get("provider"), status: formData.get("status"), notes: formData.get("notes") });
+  const parsed = planItemSchema.safeParse({ type: formData.get("type"), title: formData.get("title"), destinationId: optional(formData, "destinationId"), endDestinationId: optional(formData, "endDestinationId"), itemDate: optional(formData, "itemDate"), endDate: optional(formData, "endDate"), startTime: optional(formData, "startTime"), endTime: optional(formData, "endTime"), location: formData.get("location"), provider: formData.get("provider"), status: formData.get("status"), confidence: formData.get("confidence"), notes: formData.get("notes") });
   if (!parsed.success) redirect(messagePath(path, "error", parsed.error.issues[0]?.message ?? "Check the item."));
   const supabase = await authenticatedClient();
-  const { data, error } = await supabase.from("plan_items").update({ item_type: parsed.data.type, title: parsed.data.title, destination_id: parsed.data.destinationId, end_destination_id: parsed.data.endDestinationId, item_date: parsed.data.itemDate, end_date: parsed.data.endDate, start_time: parsed.data.startTime, end_time: parsed.data.endTime, location: parsed.data.location, provider: parsed.data.provider, status: parsed.data.status, notes: parsed.data.notes }).eq("id", itemId).eq("trip_id", tripId).select("id").maybeSingle();
+  const { data, error } = await supabase.from("plan_items").update({ item_type: parsed.data.type, title: parsed.data.title, destination_id: parsed.data.destinationId, end_destination_id: parsed.data.endDestinationId, item_date: parsed.data.itemDate, end_date: parsed.data.endDate, start_time: parsed.data.startTime, end_time: parsed.data.endTime, location: parsed.data.location, provider: parsed.data.provider, status: parsed.data.status, confidence: parsed.data.confidence, notes: parsed.data.notes }).eq("id", itemId).eq("trip_id", tripId).select("id").maybeSingle();
   if (error) redirect(messagePath(path, "error", planningDatabaseFailure("plan-item.update", error)));
   if (!data) redirect(messagePath(path, "error", "Item not found or you do not have permission to edit it."));
   revalidatePath(path); redirect(messagePath(path, "notice", "Item updated."));
