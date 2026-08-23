@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { tripRoles } from "@/features/trips/types";
 import { informationConfidences, planItemStatuses, planItemTypes } from "@/features/trips/planning";
+import { participationValues, preferenceValues } from "@/features/trips/collaboration";
 
 const uuid = z.string().uuid();
 const tripSchema = z.object({
@@ -318,4 +319,74 @@ export async function scheduleIdea(tripId: string, ideaId: string, formData: For
   const { error } = await supabase.rpc("schedule_trip_idea", { target_idea_id: ideaId, target_destination_id: destinationId.data, target_date: date.data });
   if (error) redirect(messagePath(path, "error", planningDatabaseFailure("idea.schedule", error)));
   revalidatePath(path); redirect(messagePath(path, "notice", "Idea scheduled."));
+}
+
+function revalidateCollaboration(tripId: string) {
+  revalidatePath(`/app/trips/${tripId}`);
+  revalidatePath(`/app/trips/${tripId}/ideas`);
+  revalidatePath(`/app/trips/${tripId}/decisions`);
+}
+
+export async function setPreference(tripId: string, targetType: "idea" | "plan_item", targetId: string, formData: FormData) {
+  const path = targetType === "idea" ? `/app/trips/${tripId}/ideas` : `/app/trips/${tripId}`;
+  const preference = z.enum(preferenceValues).safeParse(formData.get("preference"));
+  if (!uuid.safeParse(tripId).success || !uuid.safeParse(targetId).success || !preference.success) redirect(messagePath(path, "error", "Choose a valid preference."));
+  const supabase = await authenticatedClient();
+  const { data: claims } = await supabase.auth.getClaims(); const memberId = claims?.claims?.sub;
+  if (!memberId) redirect("/auth");
+  let existingQuery = supabase.from("reactions").select("id").eq("trip_id", tripId).eq("member_id", memberId).eq("target_type", targetType);
+  existingQuery = targetType === "idea" ? existingQuery.eq("idea_id", targetId) : existingQuery.eq("plan_item_id", targetId);
+  const { data: existing, error: readError } = await existingQuery.maybeSingle();
+  if (readError) redirect(messagePath(path, "error", planningDatabaseFailure("reaction.read", readError)));
+  const target = targetType === "idea" ? { idea_id: targetId, plan_item_id: null } : { idea_id: null, plan_item_id: targetId };
+  const result = existing
+    ? await supabase.from("reactions").update({ preference: preference.data }).eq("id", existing.id)
+    : await supabase.from("reactions").insert({ trip_id: tripId, member_id: memberId, target_type: targetType, preference: preference.data, ...target });
+  if (result.error) redirect(messagePath(path, "error", planningDatabaseFailure("reaction.set", result.error)));
+  revalidateCollaboration(tripId); redirect(messagePath(path, "notice", "Preference updated."));
+}
+
+export async function setParticipation(tripId: string, itemId: string, formData: FormData) {
+  const path = `/app/trips/${tripId}`;
+  const participation = z.enum(participationValues).safeParse(formData.get("participation"));
+  if (!uuid.safeParse(tripId).success || !uuid.safeParse(itemId).success || !participation.success) redirect(messagePath(path, "error", "Choose a valid participation response."));
+  const supabase = await authenticatedClient();
+  const { data: claims } = await supabase.auth.getClaims(); const memberId = claims?.claims?.sub;
+  if (!memberId) redirect("/auth");
+  const { error } = await supabase.from("item_participants").upsert({ trip_id: tripId, plan_item_id: itemId, member_id: memberId, participation: participation.data }, { onConflict: "trip_id,plan_item_id,member_id" });
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("participation.set", error)));
+  revalidateCollaboration(tripId); redirect(messagePath(path, "notice", "Participation updated."));
+}
+
+export async function createDecision(tripId: string, formData: FormData) {
+  const path = `/app/trips/${tripId}/decisions`;
+  const question = z.string().trim().min(1).max(240).safeParse(formData.get("question"));
+  const options = formData.getAll("options").filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean);
+  if (!uuid.safeParse(tripId).success || !question.success || options.length < 2 || options.length > 8) redirect(messagePath(path, "error", "Add a question and at least two options."));
+  const supabase = await authenticatedClient();
+  const { error } = await supabase.rpc("create_trip_decision", { target_trip_id: tripId, decision_question: question.data, option_labels: options });
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("decision.create", error)));
+  revalidateCollaboration(tripId); redirect(messagePath(path, "notice", "Decision created."));
+}
+
+export async function respondDecision(tripId: string, decisionId: string, formData: FormData) {
+  const path = `/app/trips/${tripId}/decisions`;
+  const optionId = uuid.safeParse(formData.get("optionId"));
+  if (!uuid.safeParse(tripId).success || !uuid.safeParse(decisionId).success || !optionId.success) redirect(messagePath(path, "error", "Choose an option."));
+  const supabase = await authenticatedClient();
+  const { data: claims } = await supabase.auth.getClaims(); const memberId = claims?.claims?.sub;
+  if (!memberId) redirect("/auth");
+  const { error } = await supabase.from("decision_responses").upsert({ trip_id: tripId, decision_id: decisionId, option_id: optionId.data, member_id: memberId }, { onConflict: "decision_id,member_id" });
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("decision.respond", error)));
+  revalidateCollaboration(tripId); redirect(messagePath(path, "notice", "Response updated."));
+}
+
+export async function resolveDecision(tripId: string, decisionId: string, formData: FormData) {
+  const path = `/app/trips/${tripId}/decisions`;
+  const optionId = uuid.safeParse(formData.get("optionId"));
+  if (!uuid.safeParse(tripId).success || !uuid.safeParse(decisionId).success || !optionId.success) redirect(messagePath(path, "error", "Choose the agreed option."));
+  const supabase = await authenticatedClient();
+  const { error } = await supabase.rpc("resolve_trip_decision", { target_decision_id: decisionId, target_option_id: optionId.data });
+  if (error) redirect(messagePath(path, "error", planningDatabaseFailure("decision.resolve", error)));
+  revalidateCollaboration(tripId); redirect(messagePath(path, "notice", "Decision resolved. No trip details were changed."));
 }

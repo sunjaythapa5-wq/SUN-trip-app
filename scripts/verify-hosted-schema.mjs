@@ -6,7 +6,7 @@ if (!baseUrl || !publishableKey) {
   process.exit(1);
 }
 
-const requiredTables = ["destinations", "plan_items", "ideas"];
+const requiredTables = ["destinations", "plan_items", "ideas", "reactions", "item_participants", "decisions", "decision_options", "decision_responses"];
 const failures = [];
 
 for (const table of requiredTables) {
