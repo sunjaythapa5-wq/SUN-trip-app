@@ -140,12 +140,23 @@ create table public.decision_responses (
   constraint response_once unique (decision_id, member_id)
 );
 
+create or replace function private.is_open_decision(target_decision_id uuid, target_trip_id uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.decisions
+    where id = target_decision_id and trip_id = target_trip_id and status = 'open'
+  );
+$$;
+
+revoke all on function private.is_open_decision(uuid, uuid) from public, anon;
+grant execute on function private.is_open_decision(uuid, uuid) to authenticated;
+
 create index decisions_trip_status_idx on public.decisions (trip_id, status, created_at desc);
 create index decision_options_decision_order_idx on public.decision_options (decision_id, sort_order);
 create index decision_responses_decision_idx on public.decision_responses (decision_id, option_id);
 
 create or replace function private.validate_collaboration_target()
-returns trigger language plpgsql set search_path = '' as $$
+returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if new.target_type = 'idea' then
     if not exists (select 1 from public.ideas where id = new.idea_id and trip_id = new.trip_id) then
@@ -163,7 +174,7 @@ end;
 $$;
 
 create or replace function private.validate_participation_target()
-returns trigger language plpgsql set search_path = '' as $$
+returns trigger language plpgsql security definer set search_path = '' as $$
 begin
   if not exists (
     select 1 from public.plan_items
@@ -173,6 +184,8 @@ begin
   return new;
 end;
 $$;
+
+revoke all on function private.validate_collaboration_target(), private.validate_participation_target() from public, anon, authenticated;
 
 create or replace function private.touch_collaboration_record()
 returns trigger language plpgsql set search_path = '' as $$
@@ -252,8 +265,8 @@ create policy options_update_managers on public.decision_options for update to a
 create policy options_delete_managers on public.decision_options for delete to authenticated using ((select private.can_manage_decisions(trip_id)));
 
 create policy responses_read_members on public.decision_responses for select to authenticated using ((select private.is_trip_member(trip_id)));
-create policy responses_insert_self on public.decision_responses for insert to authenticated with check ((select private.can_collaborate_trip(trip_id)) and member_id = (select auth.uid()));
-create policy responses_update_self on public.decision_responses for update to authenticated using (member_id = (select auth.uid()) and (select private.can_collaborate_trip(trip_id))) with check (member_id = (select auth.uid()) and (select private.can_collaborate_trip(trip_id)));
+create policy responses_insert_self on public.decision_responses for insert to authenticated with check ((select private.can_collaborate_trip(trip_id)) and (select private.is_open_decision(decision_id, trip_id)) and member_id = (select auth.uid()));
+create policy responses_update_self on public.decision_responses for update to authenticated using (member_id = (select auth.uid()) and (select private.can_collaborate_trip(trip_id)) and (select private.is_open_decision(decision_id, trip_id))) with check (member_id = (select auth.uid()) and (select private.can_collaborate_trip(trip_id)) and (select private.is_open_decision(decision_id, trip_id)));
 create policy responses_delete_self on public.decision_responses for delete to authenticated using (member_id = (select auth.uid()) and (select private.can_collaborate_trip(trip_id)));
 
 grant select, insert, update, delete on public.reactions, public.item_participants, public.decisions, public.decision_options, public.decision_responses to authenticated;

@@ -37,9 +37,11 @@ select results_eq($$select status::text || ':' || confidence::text from public.p
 select results_eq($$update public.destinations set name = 'Tokyo city' where id = '41000000-0000-0000-0000-000000000041' returning name$$, $$values ('Tokyo city'::text)$$, 'planner updates canonical destination data');
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000043","email":"traveller@gate4.test","role":"authenticated"}';
-select ok(private.can_plan_trip('40000000-0000-0000-0000-000000000041'), 'traveller can contribute to planning');
-select lives_ok($$insert into public.ideas (id, trip_id, destination_id, title, category) values ('43000000-0000-0000-0000-000000000041', '40000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', 'Tea ceremony', 'culture')$$, 'traveller saves an unscheduled idea');
-select lives_ok($$select public.schedule_trip_idea('43000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', '2027-04-07')$$, 'traveller schedules an idea atomically');
+select ok(not private.can_plan_trip('40000000-0000-0000-0000-000000000041'), 'Gate 5 keeps traveller collaboration separate from structural planning');
+
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000042","email":"planner@gate4.test","role":"authenticated"}';
+select lives_ok($$insert into public.ideas (id, trip_id, destination_id, title, category) values ('43000000-0000-0000-0000-000000000041', '40000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', 'Tea ceremony', 'culture')$$, 'planner saves an unscheduled idea');
+select lives_ok($$select public.schedule_trip_idea('43000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', '2027-04-07')$$, 'planner schedules an idea atomically');
 select results_eq($$select status from public.ideas where id = '43000000-0000-0000-0000-000000000041'$$, $$values ('scheduled'::public.idea_status)$$, 'scheduled idea retains provenance');
 select results_eq($$select title from public.plan_items where title = 'Tea ceremony'$$, $$values ('Tea ceremony'::text)$$, 'scheduling creates the itinerary item');
 select throws_ok($$select public.schedule_trip_idea('43000000-0000-0000-0000-000000000041', '41000000-0000-0000-0000-000000000042', '2027-04-07')$$, 'P0001', 'Idea is not available', 'an idea cannot be scheduled twice');

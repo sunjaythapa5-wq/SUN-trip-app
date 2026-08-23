@@ -44,8 +44,6 @@ select lives_ok($$insert into public.item_participants (trip_id,plan_item_id,mem
 select lives_ok($$select public.create_trip_decision('50000000-0000-0000-0000-000000000051','Where should we eat?',array['Cafe','Market'])$$, 'owner creates a transactional decision');
 select results_eq($$select count(*)::integer from public.decision_options where decision_id in (select id from public.decisions where question='Where should we eat?')$$, $$values (2)$$, 'decision creation includes all options');
 select lives_ok($$insert into public.decision_responses (trip_id,decision_id,option_id,member_id) values ('50000000-0000-0000-0000-000000000051','54000000-0000-0000-0000-000000000051','55000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000051')$$, 'owner responds');
-select lives_ok($$select public.resolve_trip_decision('54000000-0000-0000-0000-000000000051','55000000-0000-0000-0000-000000000051')$$, 'owner resolves deliberately');
-select results_eq($$select count(*)::integer from public.plan_items$$, $$values (1)$$, 'resolution does not change the itinerary');
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000052","email":"planner@gate5.test","role":"authenticated"}';
 select ok(private.can_manage_decisions('50000000-0000-0000-0000-000000000051'), 'planner can manage decisions');
@@ -57,9 +55,13 @@ select lives_ok($$insert into public.reactions (trip_id,member_id,target_type,pl
 select lives_ok($$insert into public.item_participants (trip_id,plan_item_id,member_id,participation) values ('50000000-0000-0000-0000-000000000051','52000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000053','not_going')$$, 'traveller participation is independent');
 select lives_ok($$insert into public.decision_responses (trip_id,decision_id,option_id,member_id) values ('50000000-0000-0000-0000-000000000051','54000000-0000-0000-0000-000000000051','55000000-0000-0000-0000-000000000052','00000000-0000-0000-0000-000000000053')$$, 'traveller responds');
 select throws_ok($$insert into public.plan_items (trip_id,item_type,title,sort_order,created_by) values ('50000000-0000-0000-0000-000000000051','activity','Forbidden',1,'00000000-0000-0000-0000-000000000053')$$, '42501', 'new row violates row-level security policy for table "plan_items"', 'traveller cannot add structural data');
-select throws_ok($$insert into public.reactions (trip_id,member_id,target_type,plan_item_id,preference) values ('50000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000053','plan_item','52000000-0000-0000-0000-000000000051','keen')$$, 'duplicate active reaction is prevented');
-select throws_ok($$insert into public.decision_responses (trip_id,decision_id,option_id,member_id) values ('50000000-0000-0000-0000-000000000051','54000000-0000-0000-0000-000000000051','55000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000053')$$, 'one response per member is enforced');
-select throws_ok($$insert into public.decision_responses (trip_id,decision_id,option_id,member_id) values ('50000000-0000-0000-0000-000000000051','54000000-0000-0000-0000-000000000051',gen_random_uuid(),'00000000-0000-0000-0000-000000000053')$$, 'response option must belong to decision');
+select throws_ok($$insert into public.reactions (trip_id,member_id,target_type,plan_item_id,preference) values ('50000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000053','plan_item','52000000-0000-0000-0000-000000000051','keen')$$, '23505', null, 'duplicate active reaction is prevented');
+select throws_ok($$insert into public.decision_responses (trip_id,decision_id,option_id,member_id) values ('50000000-0000-0000-0000-000000000051','54000000-0000-0000-0000-000000000051','55000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000053')$$, '23505', null, 'one response per member is enforced');
+select throws_ok($$update public.decision_responses set option_id=gen_random_uuid() where decision_id='54000000-0000-0000-0000-000000000051' and member_id='00000000-0000-0000-0000-000000000053'$$, '23503', null, 'response option must belong to decision');
+
+set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000051","email":"owner@gate5.test","role":"authenticated"}';
+select lives_ok($$select public.resolve_trip_decision('54000000-0000-0000-0000-000000000051','55000000-0000-0000-0000-000000000051')$$, 'owner resolves deliberately');
+select results_eq($$select count(*)::integer from public.plan_items$$, $$values (1)$$, 'resolution does not change the itinerary');
 
 set local request.jwt.claims = '{"sub":"00000000-0000-0000-0000-000000000054","email":"viewer@gate5.test","role":"authenticated"}';
 select results_eq($$select count(*)::integer from public.reactions$$, $$values (2)$$, 'viewer sees collaboration');
@@ -80,8 +82,8 @@ select is_empty($$update public.reactions set preference='keen' where member_id=
 select throws_ok($$insert into public.reactions (trip_id,member_id,target_type,idea_id,preference) values ('50000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000053','idea','53000000-0000-0000-0000-000000000051','keen')$$, '42501', 'new row violates row-level security policy for table "reactions"', 'removed member cannot add');
 
 reset role;
-select throws_ok($$insert into public.reactions (trip_id,member_id,target_type,plan_item_id,preference) values ('50000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000051','plan_item',gen_random_uuid(),'keen')$$, 'cross-trip or missing targets are rejected');
-select throws_ok($$update public.decisions set resolved_option_id=gen_random_uuid() where id='54000000-0000-0000-0000-000000000051'$$, 'resolved option must belong to decision');
+select throws_ok($$insert into public.reactions (trip_id,member_id,target_type,plan_item_id,preference) values ('50000000-0000-0000-0000-000000000051','00000000-0000-0000-0000-000000000051','plan_item',gen_random_uuid(),'keen')$$, 'P0001', 'Invalid collaboration target', 'cross-trip or missing targets are rejected');
+select throws_ok($$update public.decisions set resolved_option_id=gen_random_uuid() where id='54000000-0000-0000-0000-000000000051'$$, '23503', null, 'resolved option must belong to decision');
 
 select * from finish();
 rollback;
