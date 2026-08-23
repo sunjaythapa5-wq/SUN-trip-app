@@ -36,6 +36,12 @@ $$;
 revoke all on function private.can_collaborate_trip(uuid), private.can_manage_decisions(uuid) from public, anon;
 grant execute on function private.can_collaborate_trip(uuid), private.can_manage_decisions(uuid) to authenticated;
 
+-- Gate 4 created a composite identity for plan items, but ideas only had their
+-- UUID primary key. Collaboration foreign keys include trip_id deliberately so
+-- a target ID can never be associated with a record from another trip.
+alter table public.ideas
+  add constraint idea_identity unique (id, trip_id);
+
 create table public.reactions (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references public.trips(id) on delete cascade,
