@@ -3,85 +3,52 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { InviteForm } from "@/features/trips/invite-form";
+import { AutoDismissNotice, DestinationForm, IdeaForm, ItemEditorForm, MobileAddMenu, PlanningForm } from "@/features/trips/planning-forms";
+import { confidenceLabel, dateRange, formatDay, formatShortRange, itemLabel, journeyWidth, nightsBetween, statusLabel, type Destination, type Idea, type PlanItem } from "@/features/trips/planning";
 import { formatTripDates, initials, tripRoles, type TripInvite, type TripMember, type TripSummary } from "@/features/trips/types";
-import { changeMemberRole, deleteTrip, leaveTrip, removeMember, revokeInvite, updateTrip } from "../actions";
+import { changeMemberRole, deleteDestination, deletePlanItem, deleteTrip, leaveTrip, moveDestination, movePlanItem, removeMember, revokeInvite, updateTrip } from "../actions";
+
+function DestinationEditor({ tripId, destination, index, total, linkedCount, tripDates }: { tripId: string; destination: Destination; index: number; total: number; linkedCount: number; tripDates: { start: string | null; end: string | null } }) {
+  return <details className="context-menu destination-editor"><summary aria-label={`Edit ${destination.name}`}>Edit</summary><div className="sheet-card"><h3>Edit destination</h3>
+    <DestinationForm tripId={tripId} tripDates={tripDates} destination={destination} />
+    <div className="move-controls" aria-label={`Move ${destination.name}`}><form action={moveDestination.bind(null, tripId, destination.id, "earlier")}><button className="secondary" disabled={index === 0}>Move earlier</button></form><form action={moveDestination.bind(null, tripId, destination.id, "later")}><button className="secondary" disabled={index === total - 1}>Move later</button></form></div>
+    <form action={deleteDestination.bind(null, tripId, destination.id)} className="remove-form"><p><strong>Remove {destination.name}?</strong><br />This will also remove {linkedCount} linked planning {linkedCount === 1 ? "item" : "items"}. This cannot be undone.</p><button className="danger-button" type="submit">Remove destination</button></form>
+  </div></details>;
+}
+
+function ItemCard({ tripId, item, destinations, destinationNames, canPlan, tripDates }: { tripId: string; item: PlanItem; destinations: Destination[]; destinationNames: Map<string, string>; canPlan: boolean; tripDates: { start: string | null; end: string | null } }) {
+  return <article className={`plan-item ${item.item_type}`}><div className="item-topline"><span>{itemLabel(item.item_type)}</span><span className={`truth-status ${item.status}`}>{statusLabel(item.status)}</span></div><h4>{item.title}</h4>
+    {item.item_type === "transport" ? <p>{destinationNames.get(item.destination_id ?? "") ?? "Origin missing"} → {destinationNames.get(item.end_destination_id ?? "") ?? "Destination missing"}</p> : null}
+    {item.item_type === "stay" && item.item_date && item.end_date ? <p>{formatShortRange(item.item_date, item.end_date)} · {nightsBetween(item.item_date, item.end_date)} nights</p> : item.item_type !== "transport" ? <p>{item.start_time ? item.start_time.slice(0, 5) : "Time not added"}{item.location ? ` · ${item.location}` : ""}</p> : null}
+    {item.item_type === "transport" && !item.start_time ? <p>Time {confidenceLabel(item.confidence ?? "needs_checking").toLowerCase()}</p> : null}
+    {item.provider ? <p>{item.provider}</p> : null}{canPlan ? <details className="item-editor"><summary className="text-button">View / edit</summary><div className="sheet-card"><h3>Edit {itemLabel(item.item_type).toLowerCase()}</h3><ItemEditorForm tripId={tripId} item={item} destinations={destinations} tripDates={tripDates} /><div className="move-controls"><form action={movePlanItem.bind(null, tripId, item.id, "earlier")}><button className="secondary">Move earlier</button></form><form action={movePlanItem.bind(null, tripId, item.id, "later")}><button className="secondary">Move later</button></form></div><form action={deletePlanItem.bind(null, tripId, item.id)} className="remove-form"><p>Remove this item from the shared trip?</p><button className="danger-button" type="submit">Remove item</button></form></div></details> : null}
+  </article>;
+}
 
 export default async function TripPage({ params, searchParams }: { params: Promise<{ tripId: string }>; searchParams: Promise<{ error?: string; notice?: string }> }) {
-  const { tripId } = await params;
-  if (!z.string().uuid().safeParse(tripId).success) notFound();
-  const supabase = await createClient();
-  const { data: claims } = await supabase.auth.getClaims();
-  const userId = claims?.claims?.sub;
-  if (!userId) redirect("/auth");
-
-  const [{ data: tripData }, { data: memberData }] = await Promise.all([
+  const { tripId } = await params; if (!z.string().uuid().safeParse(tripId).success) notFound();
+  const supabase = await createClient(); const { data: claims } = await supabase.auth.getClaims(); const userId = claims?.claims?.sub; if (!userId) redirect("/auth");
+  const [{ data: tripData }, { data: memberData }, { data: destinationData }, { data: itemData }, { data: ideaData }] = await Promise.all([
     supabase.from("trips").select("id,name,origin,start_date,end_date,primary_currency").eq("id", tripId).maybeSingle(),
     supabase.from("trip_members").select("user_id,role,status,profiles(display_name,avatar_url)").eq("trip_id", tripId).eq("status", "active"),
+    supabase.from("destinations").select("id,trip_id,name,start_date,end_date,sort_order,notes").eq("trip_id", tripId).order("sort_order"),
+    supabase.from("plan_items").select("id,trip_id,item_type,title,destination_id,end_destination_id,item_date,end_date,start_time,end_time,sort_order,location,provider,status,confidence,notes").eq("trip_id", tripId).order("sort_order"),
+    supabase.from("ideas").select("id,trip_id,destination_id,title,link,category,notes,status,scheduled_plan_item_id").eq("trip_id", tripId).eq("status", "unscheduled").order("created_at", { ascending: false }),
   ]);
-  if (!tripData) notFound();
-  const trip = tripData as TripSummary;
-  const members = (memberData ?? []) as unknown as TripMember[];
-  const currentMember = members.find((member) => member.user_id === userId);
-  if (!currentMember) notFound();
-  const canEdit = currentMember.role === "owner" || currentMember.role === "planner";
-  const isOwner = currentMember.role === "owner";
-  const { data: inviteData } = canEdit
-    ? await supabase.from("trip_invites").select("id,email,role,expires_at,accepted_at,revoked_at").eq("trip_id", tripId).order("created_at", { ascending: false })
-    : { data: [] };
-  const invites = (inviteData ?? []) as TripInvite[];
-  const message = await searchParams;
-
-  return (
-    <main className="app-shell trip-detail-shell">
-      <header className="app-header"><Link className="wordmark" href="/app">SUN</Link><Link className="text-link" href="/app">All trips</Link></header>
-      <section className="trip-hero">
-        <div><p className="eyebrow">From {trip.origin ?? "Needs checking"}</p><h1>{trip.name}</h1><p className="lede">{formatTripDates(trip.start_date, trip.end_date)} · {trip.primary_currency}</p></div>
-        <div className="avatar-stack" aria-label={`${members.length} trip members`}>
-          {members.slice(0, 5).map((member) => <span className="avatar" key={member.user_id} title={member.profiles?.display_name ?? member.role}>{initials(member.profiles?.display_name ?? null)}</span>)}
-          {members.length > 5 ? <span className="avatar">+{members.length - 5}</span> : null}
-        </div>
-      </section>
-      <nav className="trip-tabs" aria-label="Trip sections">
-        <span aria-current="page">Trip</span><span aria-disabled="true">Explore</span><span aria-disabled="true">Ideas</span><span aria-disabled="true">Money</span><span aria-disabled="true">Check</span>
-      </nav>
-      {message.error ? <p className="auth-message error" role="alert">{message.error}</p> : null}
-      {message.notice ? <p className="auth-message notice">{message.notice}</p> : null}
-
-      <div className="detail-grid">
-        <section className="panel" aria-labelledby="details-title">
-          <div className="section-heading"><div><p className="eyebrow">Canonical trip</p><h2 id="details-title">Trip details</h2></div><span className="role-badge">{currentMember.role}</span></div>
-          {canEdit ? (
-            <form action={updateTrip.bind(null, tripId)} className="trip-form compact-form">
-              <label htmlFor="name">Trip name</label><input id="name" name="name" defaultValue={trip.name} required maxLength={120} />
-              <label htmlFor="origin">Starting from</label><input id="origin" name="origin" defaultValue={trip.origin ?? ""} required maxLength={120} />
-              <div className="field-row"><div><label htmlFor="startDate">Start date</label><input id="startDate" name="startDate" type="date" defaultValue={trip.start_date ?? ""} required /></div><div><label htmlFor="endDate">End date</label><input id="endDate" name="endDate" type="date" defaultValue={trip.end_date ?? ""} required /></div></div>
-              <label htmlFor="currency">Primary currency</label><select id="currency" name="currency" defaultValue={trip.primary_currency}>{['AUD','USD','EUR','GBP','NZD','JPY','THB','CHF'].map((currency) => <option key={currency}>{currency}</option>)}</select>
-              <button className="primary" type="submit">Save trip details</button>
-            </form>
-          ) : <dl className="facts"><div><dt>Starting from</dt><dd>{trip.origin}</dd></div><div><dt>Dates</dt><dd>{formatTripDates(trip.start_date, trip.end_date)}</dd></div><div><dt>Currency</dt><dd>{trip.primary_currency}</dd></div></dl>}
-        </section>
-
-        <section className="panel" aria-labelledby="members-title">
-          <div className="section-heading"><div><p className="eyebrow">Shared access</p><h2 id="members-title">Members · {members.length}</h2></div></div>
-          <div className="member-list">
-            {members.map((member) => (
-              <article className="member-row" key={member.user_id}>
-                <span className="avatar">{initials(member.profiles?.display_name ?? null)}</span>
-                <div className="member-copy"><strong>{member.user_id === userId ? "You" : member.profiles?.display_name ?? "Trip member"}</strong><span>{member.role}</span></div>
-                {isOwner && member.role !== "owner" ? <div className="member-actions"><form action={changeMemberRole.bind(null, tripId, member.user_id)}><select name="role" defaultValue={member.role} aria-label="Member role">{tripRoles.map((role) => <option key={role}>{role}</option>)}</select><button className="text-button" type="submit">Update</button></form><form action={removeMember.bind(null, tripId, member.user_id)}><button className="text-button danger-text" type="submit">Remove</button></form></div> : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      {canEdit ? <InviteForm tripId={tripId} /> : null}
-      {canEdit && invites.length ? <section className="panel"><div className="section-heading"><div><p className="eyebrow">Invitation history</p><h2>Invitations</h2></div></div><div className="invite-list">{invites.map((invite) => { const active = !invite.accepted_at && !invite.revoked_at && new Date(invite.expires_at) > new Date(); return <article className="invite-row" key={invite.id}><div><strong>{invite.email}</strong><span>{invite.role} · {invite.accepted_at ? "accepted" : invite.revoked_at ? "revoked" : active ? "pending" : "expired"}</span></div>{active ? <form action={revokeInvite.bind(null, tripId, invite.id)}><button className="text-button danger-text" type="submit">Revoke</button></form> : null}</article>; })}</div></section> : null}
-
-      <section className="panel danger-zone" aria-labelledby="access-title">
-        <div><p className="eyebrow">Access</p><h2 id="access-title">{isOwner ? "Delete this trip" : "Leave this trip"}</h2><p>{isOwner ? "Deletes the trip and all current Gate 3 membership records." : "You will immediately lose access unless invited again."}</p></div>
-        <form action={isOwner ? deleteTrip.bind(null, tripId) : leaveTrip.bind(null, tripId)}><button className="danger-button" type="submit">{isOwner ? "Delete trip" : "Leave trip"}</button></form>
-      </section>
-    </main>
-  );
+  if (!tripData) notFound(); const trip = tripData as TripSummary; const members = (memberData ?? []) as unknown as TripMember[]; const currentMember = members.find((member) => member.user_id === userId); if (!currentMember) notFound();
+  const canAdmin = currentMember.role === "owner" || currentMember.role === "planner"; const canPlan = currentMember.role !== "viewer"; const isOwner = currentMember.role === "owner";
+  const destinations = (destinationData ?? []) as Destination[]; const items = (itemData ?? []) as PlanItem[]; const ideas = (ideaData ?? []) as Idea[]; const destinationNames = new Map(destinations.map((destination) => [destination.id, destination.name]));
+  const { data: inviteData } = canAdmin ? await supabase.from("trip_invites").select("id,email,role,expires_at,accepted_at,revoked_at").eq("trip_id", tripId).order("created_at", { ascending: false }) : { data: [] }; const invites = (inviteData ?? []) as TripInvite[]; const message = await searchParams; const nights = trip.start_date && trip.end_date ? nightsBetween(trip.start_date, trip.end_date) : null; const tripDates = { start: trip.start_date, end: trip.end_date };
+  return <main className="app-shell visual-trip-shell">
+    <header className="app-header"><Link className="wordmark" href="/app">SUN</Link><Link className="text-link" href="/app">All trips</Link></header>
+    <section className="visual-trip-header"><div><p className="eyebrow">From {trip.origin ?? "Needs checking"}</p><h1>{trip.name}</h1><p className="lede">{formatTripDates(trip.start_date, trip.end_date)}{nights !== null ? ` · ${nights} nights` : ""} · {trip.primary_currency}</p></div><div className="trip-context-actions"><div className="avatar-stack" aria-label={`${members.length} travellers`}>{members.slice(0, 5).map((member) => <span className="avatar" key={member.user_id} title={member.profiles?.display_name ?? member.role}>{initials(member.profiles?.display_name ?? null)}</span>)}{members.length > 5 ? <span className="avatar">+{members.length - 5}</span> : null}</div>{canAdmin ? <a className="round-action" href="#travellers" aria-label="Invite a traveller">+</a> : null}<details className="context-menu"><summary aria-label="Trip settings">•••</summary><div className="sheet-card admin-sheet"><h3>Trip settings</h3><form action={updateTrip.bind(null, tripId)} className="sheet-form"><label>Trip name<input name="name" defaultValue={trip.name} required /></label><label>Starting from<input name="origin" defaultValue={trip.origin ?? ""} required /></label><div className="field-row"><label>Start<input type="date" name="startDate" defaultValue={trip.start_date ?? ""} required /></label><label>End<input type="date" name="endDate" defaultValue={trip.end_date ?? ""} required /></label></div><label>Currency<input name="currency" defaultValue={trip.primary_currency} required pattern="[A-Z]{3}" /></label><button className="primary">Save trip details</button></form><hr /><form action={isOwner ? deleteTrip.bind(null, tripId) : leaveTrip.bind(null, tripId)} className="remove-form"><p>{isOwner ? "Permanently delete this trip and remove access for everyone. This cannot be undone." : "Leave this trip and lose access until invited again."}</p><button className="danger-button">{isOwner ? "Delete trip" : "Leave trip"}</button></form></div></details></div></section>
+    <nav className="trip-tabs" aria-label="Trip sections"><a aria-current="page" href="#trip">Trip</a><span aria-disabled="true">Explore</span><Link href={`/app/trips/${tripId}/ideas`}>Ideas</Link><span aria-disabled="true">Money</span><span aria-disabled="true">Check</span></nav>{message.error ? <p className="auth-message error" role="alert">{message.error}</p> : null}{message.notice ? <AutoDismissNotice message={message.notice} /> : null}
+    <section id="trip" className="journey-ribbon" aria-label="Journey route"><div className="journey-node origin-node"><span>Start</span><strong>{trip.origin ?? "Origin missing"}</strong></div>{destinations.map((destination) => { const destinationNights = nightsBetween(destination.start_date, destination.end_date); return <div className="journey-segment" key={destination.id}><span className="journey-arrow">→</span><a href={`#destination-${destination.id}`} className="journey-node" style={{ width: journeyWidth(destinationNights) }}><strong>{destination.name}</strong><span>{formatShortRange(destination.start_date, destination.end_date)} · {destinationNights} nights</span></a></div>; })}<div className="journey-segment"><span className="journey-arrow">→</span><div className="journey-node origin-node"><span>Return</span><strong>{trip.origin ?? "Origin missing"}</strong></div></div></section>
+    {destinations.length === 0 ? <section className="empty-state planning-empty"><p className="eyebrow">Your journey starts here</p><h2>Where to first?</h2><p>Add the first place you will stay. Dates can be changed later.</p>{canPlan ? <details className="add-sheet"><summary className="button primary">+ Add destination</summary><div className="sheet-card"><h3>Add destination</h3><DestinationForm tripId={tripId} tripDates={tripDates} /></div></details> : null}</section> : null}
+    <div className="itinerary-stack">{destinations.map((destination, index) => { const destinationItems = items.filter((item) => item.destination_id === destination.id && item.item_type !== "transport"); const stays = destinationItems.filter((item) => item.item_type === "stay"); const datedItems = destinationItems.filter((item) => item.item_type !== "stay"); const transport = items.find((item) => item.item_type === "transport" && item.destination_id === destination.id && item.end_destination_id === destinations[index + 1]?.id); const linkedCount = items.filter((item) => item.destination_id === destination.id || item.end_destination_id === destination.id).length;
+      return <div className="itinerary-stop" key={destination.id}><section className="destination-block" id={`destination-${destination.id}`}><header className="destination-heading"><div><p className="eyebrow">Stop {index + 1}</p><h2>{destination.name}</h2><p>{formatShortRange(destination.start_date, destination.end_date)} · {nightsBetween(destination.start_date, destination.end_date)} nights</p></div>{canPlan ? <DestinationEditor tripId={tripId} destination={destination} index={index} total={destinations.length} linkedCount={linkedCount} tripDates={tripDates} /> : null}</header><div className="stay-band">{stays.length ? stays.map((stay) => <ItemCard key={stay.id} tripId={tripId} item={stay} destinations={destinations} destinationNames={destinationNames} canPlan={canPlan} tripDates={tripDates} />) : <div><strong>{nightsBetween(destination.start_date, destination.end_date)} nights need accommodation</strong><span>Stay not added yet</span>{canPlan ? <details className="add-sheet inline-add"><summary className="text-button">+ Add stay</summary><div className="sheet-card"><h3>Add stay in {destination.name}</h3><PlanningForm tripId={tripId} destinations={destinations} tripDates={tripDates} initialType="stay" /></div></details> : null}</div>}</div><div className="day-timeline">{dateRange(destination.start_date, destination.end_date).map((day) => { const dayItems = datedItems.filter((item) => item.item_date === day); return <article className="day-row" key={day}><time dateTime={day}>{formatDay(day)}</time><div className="day-content">{dayItems.length ? dayItems.map((item) => <ItemCard key={item.id} tripId={tripId} item={item} destinations={destinations} destinationNames={destinationNames} canPlan={canPlan} tripDates={tripDates} />) : <div className="empty-day"><strong>Nothing planned</strong><span>Leave it open or add something.</span></div>}</div></article>; })}</div></section>{index < destinations.length - 1 ? <div className="transport-connector"><span className="connector-line" />{transport ? <ItemCard tripId={tripId} item={transport} destinations={destinations} destinationNames={destinationNames} canPlan={canPlan} tripDates={tripDates} /> : <div><strong>Getting to {destinations[index + 1].name} not added yet</strong><span>Transport details can stay incomplete.</span></div>}</div> : null}</div>; })}</div>
+    {canPlan && destinations.length ? <><section className="planning-actions desktop-planning-actions"><details className="add-sheet"><summary className="button primary">+ Add something</summary><div className="sheet-card"><h3>Add to {trip.name}</h3><PlanningForm tripId={tripId} destinations={destinations} tripDates={tripDates} /></div></details><details className="add-sheet"><summary className="button secondary">+ Add destination</summary><div className="sheet-card"><h3>Add destination</h3><DestinationForm tripId={tripId} tripDates={tripDates} /></div></details></section><section className="mobile-add-control"><details className="add-sheet"><summary className="button primary">+ Add</summary><div className="sheet-card"><h3>Add to {trip.name}</h3><MobileAddMenu tripId={tripId} destinations={destinations} tripDates={tripDates} /></div></details></section></> : null}
+    <section id="ideas" className="ideas-section ideas-preview"><div><p className="eyebrow">Possibilities</p><h2>Ideas{ideas.length ? ` · ${ideas.length}` : ""}</h2><p>{ideas.length ? ideas.slice(0, 3).map((idea) => idea.title).join(" · ") : "Save possibilities without deciding when to do them."}</p></div><div className="inline-actions">{canPlan ? <details className="add-sheet"><summary className="button secondary">+ Add idea</summary><div className="sheet-card"><h3>Save an idea</h3><IdeaForm tripId={tripId} destinations={destinations} /></div></details> : null}<Link className="text-link" href={`/app/trips/${tripId}/ideas`}>View all →</Link></div></section>
+    <details id="travellers" className="traveller-management"><summary>Manage travellers · {members.length}</summary><div className="panel"><div className="member-list">{members.map((member) => <article className="member-row" key={member.user_id}><span className="avatar">{initials(member.profiles?.display_name ?? null)}</span><div className="member-copy"><strong>{member.user_id === userId ? "You" : member.profiles?.display_name ?? "Traveller"}</strong><span>{member.role}</span></div>{isOwner && member.role !== "owner" ? <div className="member-actions"><form action={changeMemberRole.bind(null, tripId, member.user_id)}><select name="role" defaultValue={member.role}>{tripRoles.map((role) => <option key={role}>{role}</option>)}</select><button className="text-button">Update</button></form><form action={removeMember.bind(null, tripId, member.user_id)}><button className="text-button danger-text">Remove</button></form></div> : null}</article>)}</div>{canAdmin ? <InviteForm tripId={tripId} /> : null}{canAdmin && invites.length ? <div className="invite-list"><h3>Pending invites</h3>{invites.map((invite) => { const active = !invite.accepted_at && !invite.revoked_at && new Date(invite.expires_at) > new Date(); return <article className="invite-row" key={invite.id}><div><strong>{invite.email}</strong><span>{invite.role} · {active ? "pending" : invite.accepted_at ? "accepted" : invite.revoked_at ? "revoked" : "expired"}</span></div>{active ? <form action={revokeInvite.bind(null, tripId, invite.id)}><button className="text-button danger-text">Revoke</button></form> : null}</article>; })}</div> : null}</div></details>
+  </main>;
 }

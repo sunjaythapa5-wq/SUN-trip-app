@@ -15,9 +15,13 @@ describe("authentication route decisions", () => {
     expect(getRouteDecision("/auth", true)).toEqual({ type: "redirect", pathname: "/app" });
   });
 
-  it("allows callback and public routes to continue", () => {
+  it("treats the Alpha root as an app entry point", () => {
+    expect(getRouteDecision("/", false)).toEqual({ type: "redirect", pathname: "/auth" });
+    expect(getRouteDecision("/", true)).toEqual({ type: "redirect", pathname: "/app" });
+  });
+
+  it("allows the auth callback to continue", () => {
     expect(getRouteDecision("/auth/callback", false)).toEqual({ type: "continue" });
-    expect(getRouteDecision("/", false)).toEqual({ type: "continue" });
   });
 });
 
