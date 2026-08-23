@@ -228,6 +228,33 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
 .traveller-management .panel { margin-top: 8px; }
 .traveller-management .panel > .panel { margin-top: 28px; padding: 20px 0 0; border-width: 1px 0 0; border-radius: 0; box-shadow: none; }
 
+/* Gate 5 embedded collaboration */
+.decision-signal { min-height: 38px; display: inline-flex; align-items: center; padding: 8px 12px; border-radius: 999px; color: white; background: var(--ink); font-size: .78rem; font-weight: 800; text-decoration: none; }
+.decision-signal.subtle { border: 1px solid var(--line); color: var(--muted); background: var(--card); }
+.attribution { display: block; margin-top: 8px; color: var(--muted); font-size: .74rem; }
+.card-collaboration { display: grid; gap: 8px; margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); }
+.collaboration-control, .participation-control { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--muted); font-size: .78rem; }
+.collaboration-control > strong, .participation-control > strong { color: var(--ink); }
+.muted-note { color: var(--muted); }
+.preference-grid, .decision-option-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.preference-choice, .decision-option { min-height: 52px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: var(--paper); font: inherit; font-weight: 750; cursor: pointer; }
+.preference-choice.selected, .decision-option.selected { border-color: var(--accent); color: white; background: var(--accent); }
+.preference-detail { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.preference-detail p { display: flex; justify-content: space-between; gap: 16px; }
+.mini-avatar-stack { display: flex; }
+.mini-avatar-stack span { display: inline-grid; width: 28px; height: 28px; place-items: center; margin-right: -6px; border: 2px solid white; border-radius: 50%; color: white; background: var(--accent); font-size: .65rem; font-weight: 800; }
+.decision-list { display: grid; gap: 16px; }
+.decision-card { padding: clamp(24px, 5vw, 42px); border-radius: 25px; color: white; background: #17211d; box-shadow: 0 20px 60px rgb(23 33 29 / 12%); }
+.decision-card h2 { max-width: 720px; margin: 6px 0 12px; font-size: clamp(1.55rem, 4vw, 2.5rem); letter-spacing: -.04em; }
+.decision-kicker { margin: 0; color: #8fd1bb; font: 750 .72rem/1.2 var(--font-mono), monospace; letter-spacing: .12em; text-transform: uppercase; }
+.decision-summary { color: #d2ddd8; }
+.decision-results { display: grid; gap: 7px; margin: 22px 0; }
+.decision-results div { display: flex; justify-content: space-between; gap: 20px; padding: 11px 0; border-top: 1px solid rgb(255 255 255 / 14%); }
+.decision-card .text-button { color: #a9e1cf; }
+.decision-card .secondary { border-color: rgb(255 255 255 / 30%); color: white; background: rgb(255 255 255 / 8%); }
+.decision-options-field { display: grid; gap: 10px; margin: 4px 0; padding: 16px; border: 1px solid var(--line); border-radius: 16px; }
+.decision-options-field legend { padding: 0 6px; font-size: .84rem; font-weight: 800; }
+
 @media (max-width: 760px) {
   .visual-trip-header { align-items: stretch; flex-direction: column; gap: 18px; margin: 30px 0 22px; }
   .visual-trip-header h1 { font-size: clamp(2.45rem, 12vw, 3.55rem); line-height: .98; }
@@ -253,4 +280,9 @@ button { min-height: 48px; padding: 12px 18px; border-radius: 13px; font: inheri
   .ideas-preview { align-items: stretch; flex-direction: column; }
   .ideas-section .section-heading { align-items: stretch; flex-direction: column; }
   .ideas-section .button { width: 100%; }
+  .trip-context-actions { flex-wrap: wrap; }
+  .decision-signal { min-height: 44px; }
+  .preference-grid, .decision-option-form { grid-template-columns: 1fr; }
+  .decision-card { padding: 24px 18px; border-radius: 20px; }
+  .collaboration-control, .participation-control { align-items: flex-start; flex-direction: column; }
 }

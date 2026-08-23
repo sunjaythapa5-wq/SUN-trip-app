@@ -29,6 +29,7 @@ export type PlanItem = {
   status: (typeof planItemStatuses)[number];
   confidence: (typeof informationConfidences)[number];
   notes: string | null;
+  created_by: string;
 };
 
 export type Idea = {
@@ -41,6 +42,7 @@ export type Idea = {
   notes: string | null;
   status: "unscheduled" | "scheduled";
   scheduled_plan_item_id: string | null;
+  created_by: string;
 };
 
 export type DateContext = {
